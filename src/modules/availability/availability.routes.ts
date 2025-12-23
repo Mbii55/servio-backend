@@ -15,13 +15,13 @@ import {
 const router = Router();
 
 // Provider availability (manage own schedule)
-router.get("/me", auth("provider"), listMyAvailabilityHandler);
+router.get("/", auth("provider"), listMyAvailabilityHandler);
 router.post("/", auth("provider"), createAvailabilityHandler);
 router.patch("/:id", auth("provider"), updateAvailabilityHandler);
 router.delete("/:id", auth("provider"), deleteAvailabilityHandler);
 
 // Provider blocked dates (holidays/time off)
-router.get("/me/blocked-dates", auth("provider"), listMyBlockedDatesHandler);
+router.get("/blocked-dates", auth("provider"), listMyBlockedDatesHandler);
 router.post("/blocked-dates", auth("provider"), createBlockedDateHandler);
 router.delete("/blocked-dates/:id", auth("provider"), deleteBlockedDateHandler);
 

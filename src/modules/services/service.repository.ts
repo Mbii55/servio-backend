@@ -1,6 +1,13 @@
 // src/modules/services/service.repository.ts
 import pool from "../../config/database";
-import { Service, CreateServiceInput, UpdateServiceInput } from "./service.types";
+import {
+  Service,
+  CreateServiceInput,
+  UpdateServiceInput,
+} from "./service.types";
+import {
+  deleteCloudinaryImageByUrl,
+} from "../../utils/cloudinary-delete-by-url"; // ⬅️ new import
 
 export async function listActiveServices(params: {
   categoryId?: string;
@@ -25,7 +32,9 @@ export async function listActiveServices(params: {
     index++;
   }
 
-  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause = conditions.length
+    ? `WHERE ${conditions.join(" AND ")}`
+    : "";
 
   const query = `
     SELECT *
@@ -48,7 +57,9 @@ export async function getServiceById(id: string): Promise<Service | null> {
   return result.rows[0] || null;
 }
 
-export async function listServicesByProvider(providerId: string): Promise<Service[]> {
+export async function listServicesByProvider(
+  providerId: string
+): Promise<Service[]> {
   const result = await pool.query<Service>(
     `SELECT * FROM services WHERE provider_id = $1 ORDER BY created_at DESC`,
     [providerId]
@@ -104,6 +115,17 @@ export async function updateService(
   id: string,
   input: UpdateServiceInput
 ): Promise<Service | null> {
+  // 1) Load existing service so we can detect removed images
+  const existing = await getServiceById(id);
+  if (!existing) return null;
+
+  // pg will give JSONB as plain JS; be defensive
+  const existingImages: string[] = Array.isArray(
+    (existing as any).images
+  )
+    ? ((existing as any).images as string[])
+    : [];
+
   const fields: string[] = [];
   const values: any[] = [];
   let index = 1;
@@ -128,17 +150,22 @@ export async function updateService(
     fields.push(`duration_minutes = $${index++}`);
     values.push(input.duration_minutes);
   }
+
+  // 2) Handle images: track new images so we can delete removed ones
+  let newImages: string[] = existingImages;
   if (input.images !== undefined) {
+    newImages = input.images ?? [];
     fields.push(`images = $${index++}`);
-    values.push(input.images ? JSON.stringify(input.images) : null);
+    values.push(newImages.length ? JSON.stringify(newImages) : null);
   }
+
   if (input.is_active !== undefined) {
     fields.push(`is_active = $${index++}`);
     values.push(input.is_active);
   }
 
+  // Nothing to update
   if (fields.length === 0) {
-    const existing = await getServiceById(id);
     return existing;
   }
 
@@ -151,7 +178,23 @@ export async function updateService(
   values.push(id);
 
   const result = await pool.query<Service>(query, values);
-  return result.rows[0] || null;
+  const updated = result.rows[0] || null;
+
+  // 3) Delete removed images from Cloudinary (fire-and-forget)
+  if (updated && input.images !== undefined) {
+    const removedImages = existingImages.filter(
+      (url) => !newImages.includes(url)
+    );
+
+    for (const url of removedImages) {
+      // don't block response on deletes; just log failures
+      deleteCloudinaryImageByUrl(url).catch((err) =>
+        console.error("Cloudinary delete error:", err)
+      );
+    }
+  }
+
+  return updated;
 }
 
 export async function deactivateService(id: string): Promise<Service | null> {

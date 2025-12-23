@@ -12,8 +12,8 @@ export interface ProviderAvailability {
   id: string;
   provider_id: string;
   day_of_week: DayOfWeek;
-  start_time: string;  // "HH:MM:SS"
-  end_time: string;    // "HH:MM:SS"
+  start_time: string;
+  end_time: string;
   is_available: boolean;
   created_at: string;
   updated_at: string;
@@ -22,15 +22,15 @@ export interface ProviderAvailability {
 export interface ProviderBlockedDate {
   id: string;
   provider_id: string;
-  blocked_date: string; // "YYYY-MM-DD"
+  blocked_date: string;
   reason: string | null;
   created_at: string;
 }
 
 export interface CreateAvailabilityInput {
   day_of_week: DayOfWeek;
-  start_time: string;   // "HH:MM"
-  end_time: string;     // "HH:MM"
+  start_time: string;
+  end_time: string;
   is_available?: boolean;
 }
 
@@ -42,6 +42,6 @@ export interface UpdateAvailabilityInput {
 }
 
 export interface CreateBlockedDateInput {
-  blocked_date: string; // "YYYY-MM-DD"
+  blocked_date: string;
   reason?: string;
 }

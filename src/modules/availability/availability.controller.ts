@@ -20,6 +20,8 @@ import {
 } from "./availability.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
 
+const BUFFER_TIME_MINUTES = 30; // 30 minute buffer between appointments
+
 // helper: map JS day (0=Sun) → DB enum
 function mapJsDayToEnum(day: number): DayOfWeek {
   const map: Record<number, DayOfWeek> = {
@@ -34,23 +36,54 @@ function mapJsDayToEnum(day: number): DayOfWeek {
   return map[day];
 }
 
-// helper: generate time slots between start/end at 30min steps
-function generateSlots(start: string, end: string, stepMinutes = 30): string[] {
-  const [startH, startM] = start.split(":").map(Number);
-  const [endH, endM] = end.split(":").map(Number);
+// helper: convert time string to minutes since midnight
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
 
-  let startTotal = startH * 60 + startM;
-  const endTotal = endH * 60 + endM;
+// helper: convert minutes to time string HH:MM
+function minutesToTime(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// helper: generate time slots with buffer consideration
+function generateSlotsWithBuffer(
+  start: string,
+  end: string,
+  serviceDurationMinutes: number,
+  bookedTimes: Set<string>
+): string[] {
+  const startMinutes = timeToMinutes(start);
+  const endMinutes = timeToMinutes(end);
+  const totalSlotTime = serviceDurationMinutes + BUFFER_TIME_MINUTES;
 
   const slots: string[] = [];
-  while (startTotal + stepMinutes <= endTotal) {
-    const h = Math.floor(startTotal / 60);
-    const m = startTotal % 60;
-    const hh = h.toString().padStart(2, "0");
-    const mm = m.toString().padStart(2, "0");
-    slots.push(`${hh}:${mm}`);
-    startTotal += stepMinutes;
+  let currentMinutes = startMinutes;
+
+  while (currentMinutes + serviceDurationMinutes <= endMinutes) {
+    const slotTime = minutesToTime(currentMinutes);
+    
+    // Check if this slot or any time within service duration is booked
+    let isSlotAvailable = true;
+    for (let i = 0; i < serviceDurationMinutes; i += 30) {
+      const checkTime = minutesToTime(currentMinutes + i);
+      if (bookedTimes.has(checkTime)) {
+        isSlotAvailable = false;
+        break;
+      }
+    }
+
+    if (isSlotAvailable) {
+      slots.push(slotTime);
+    }
+
+    // Move to next slot (service duration + buffer)
+    currentMinutes += totalSlotTime;
   }
+
   return slots;
 }
 
@@ -59,31 +92,31 @@ function generateSlots(start: string, end: string, stepMinutes = 30): string[] {
 export const listMyAvailabilityHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     if (user.role !== "provider" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only providers can view this" });
+      return res.status(403).json({ error: "Only providers can view this" });
     }
 
     const availability = await listAvailabilityForProvider(user.userId);
     return res.json(availability);
   } catch (err) {
     console.error("listMyAvailabilityHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
 export const createAvailabilityHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     if (user.role !== "provider" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only providers can edit availability" });
+      return res.status(403).json({ error: "Only providers can edit availability" });
     }
 
     const body = req.body as Partial<CreateAvailabilityInput>;
     if (!body.day_of_week || !body.start_time || !body.end_time) {
       return res.status(400).json({
-        message: "day_of_week, start_time, end_time are required",
+        error: "day_of_week, start_time, end_time are required",
       });
     }
 
@@ -91,22 +124,22 @@ export const createAvailabilityHandler = async (req: Request, res: Response) => 
       day_of_week: body.day_of_week,
       start_time: body.start_time,
       end_time: body.end_time,
-      is_available: body.is_available,
+      is_available: body.is_available ?? true,
     });
 
     return res.status(201).json(availability);
   } catch (err) {
     console.error("createAvailabilityHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
 export const updateAvailabilityHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     if (user.role !== "provider" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only providers can edit availability" });
+      return res.status(403).json({ error: "Only providers can edit availability" });
     }
 
     const { id } = req.params;
@@ -114,35 +147,35 @@ export const updateAvailabilityHandler = async (req: Request, res: Response) => 
 
     const updated = await updateAvailability(id, user.userId, body);
     if (!updated) {
-      return res.status(404).json({ message: "Availability slot not found" });
+      return res.status(404).json({ error: "Availability slot not found" });
     }
 
     return res.json(updated);
   } catch (err) {
     console.error("updateAvailabilityHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
 export const deleteAvailabilityHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     if (user.role !== "provider" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only providers can edit availability" });
+      return res.status(403).json({ error: "Only providers can edit availability" });
     }
 
     const { id } = req.params;
     const success = await deleteAvailability(id, user.userId);
 
     if (!success) {
-      return res.status(404).json({ message: "Availability slot not found" });
+      return res.status(404).json({ error: "Availability slot not found" });
     }
 
     return res.json({ message: "Availability slot deleted" });
   } catch (err) {
     console.error("deleteAvailabilityHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
@@ -151,30 +184,30 @@ export const deleteAvailabilityHandler = async (req: Request, res: Response) => 
 export const listMyBlockedDatesHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     if (user.role !== "provider" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only providers can view this" });
+      return res.status(403).json({ error: "Only providers can view this" });
     }
 
     const blocked = await listBlockedDatesForProvider(user.userId);
     return res.json(blocked);
   } catch (err) {
     console.error("listMyBlockedDatesHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
 export const createBlockedDateHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     if (user.role !== "provider" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only providers can edit blocked dates" });
+      return res.status(403).json({ error: "Only providers can edit blocked dates" });
     }
 
     const body = req.body as Partial<CreateBlockedDateInput>;
     if (!body.blocked_date) {
-      return res.status(400).json({ message: "blocked_date is required" });
+      return res.status(400).json({ error: "blocked_date is required" });
     }
 
     const blocked = await createBlockedDate(user.userId, {
@@ -185,29 +218,29 @@ export const createBlockedDateHandler = async (req: Request, res: Response) => {
     return res.status(201).json(blocked);
   } catch (err) {
     console.error("createBlockedDateHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
 export const deleteBlockedDateHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     if (user.role !== "provider" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only providers can edit blocked dates" });
+      return res.status(403).json({ error: "Only providers can edit blocked dates" });
     }
 
     const { id } = req.params;
     const success = await deleteBlockedDate(id, user.userId);
 
     if (!success) {
-      return res.status(404).json({ message: "Blocked date not found" });
+      return res.status(404).json({ error: "Blocked date not found" });
     }
 
     return res.json({ message: "Blocked date deleted" });
   } catch (err) {
     console.error("deleteBlockedDateHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
@@ -219,24 +252,52 @@ export const getProviderSlotsForDateHandler = async (
 ) => {
   try {
     const { providerId } = req.params;
-    const { date, stepMinutes } = req.query as {
+    const { date, serviceDuration } = req.query as {
       date?: string;
-      stepMinutes?: string;
+      serviceDuration?: string;
     };
 
     if (!date) {
-      return res.status(400).json({ message: "date is required (YYYY-MM-DD)" });
+      return res.status(400).json({ error: "date is required (YYYY-MM-DD)" });
     }
 
-    // Check if provider is blocked completely
+    if (!serviceDuration) {
+      return res.status(400).json({ error: "serviceDuration (in minutes) is required" });
+    }
+
+    const durationMinutes = Number(serviceDuration);
+    if (isNaN(durationMinutes) || durationMinutes <= 0) {
+      return res.status(400).json({ error: "serviceDuration must be a positive number" });
+    }
+
+    // Check if date is within 30 days
+    const requestedDate = new Date(date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const maxDate = new Date(today);
+    maxDate.setDate(maxDate.getDate() + 30);
+
+    if (requestedDate < today || requestedDate > maxDate) {
+      return res.status(400).json({ 
+        error: "Date must be within the next 30 days" 
+      });
+    }
+
+    // Check if provider is blocked on this date
     const blocked = await isProviderBlockedOnDate(providerId, date);
     if (blocked) {
-      return res.json({ date, slots: [] });
+      return res.json({ 
+        provider_id: providerId,
+        date, 
+        slots: [],
+        message: "Provider is unavailable on this date"
+      });
     }
 
     const jsDate = new Date(date);
     if (isNaN(jsDate.getTime())) {
-      return res.status(400).json({ message: "Invalid date format" });
+      return res.status(400).json({ error: "Invalid date format" });
     }
 
     const dayOfWeek = mapJsDayToEnum(jsDate.getUTCDay());
@@ -246,34 +307,42 @@ export const getProviderSlotsForDateHandler = async (
     );
 
     if (availability.length === 0) {
-      return res.json({ date, slots: [] });
+      return res.json({ 
+        provider_id: providerId,
+        date, 
+        slots: [],
+        message: "Provider is not available on this day of the week"
+      });
     }
 
     const bookedTimes = await listBookedTimesForDate(providerId, date);
-    const bookedSet = new Set(bookedTimes); // "HH:MM"
+    const bookedSet = new Set(bookedTimes);
 
-    const step = stepMinutes ? Number(stepMinutes) : 30;
     const allSlots: string[] = [];
 
     for (const range of availability) {
       const start = range.start_time.substring(0, 5);
       const end = range.end_time.substring(0, 5);
 
-      const rangeSlots = generateSlots(start, end, step);
-      for (const slot of rangeSlots) {
-        if (!bookedSet.has(slot)) {
-          allSlots.push(slot);
-        }
-      }
+      const rangeSlots = generateSlotsWithBuffer(
+        start,
+        end,
+        durationMinutes,
+        bookedSet
+      );
+      
+      allSlots.push(...rangeSlots);
     }
 
     return res.json({
       provider_id: providerId,
       date,
+      service_duration_minutes: durationMinutes,
+      buffer_time_minutes: BUFFER_TIME_MINUTES,
       slots: allSlots,
     });
   } catch (err) {
     console.error("getProviderSlotsForDateHandler error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
