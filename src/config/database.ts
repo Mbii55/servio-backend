@@ -37,7 +37,7 @@ export const testDbConnection = async () => {
   }
 };
 
-pool.on("error", (err) => {
+pool.on("error", (err: unknown) => {
   console.error("❌ Unexpected database error:", err);
   process.exit(-1);
 });

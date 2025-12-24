@@ -300,7 +300,7 @@ export async function updateBookingStatus(
   /* ======================================================
      2. Validate status transition
   ====================================================== */
-  const allowed = VALID_TRANSITIONS[existing.status] || [];
+  const allowed = VALID_TRANSITIONS[existing.status as BookingStatus] || [];
   if (!allowed.includes(newStatus)) {
     throw new Error(
       `Invalid status transition from ${existing.status} to ${newStatus}`

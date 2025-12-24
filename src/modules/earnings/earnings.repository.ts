@@ -182,7 +182,7 @@ export async function adminEarningsByProvider(
   `;
 
   const res = await pool.query(q, params);
-  return res.rows.map(r => ({
+  return res.rows.map((r:any) => ({
     provider_id: r.provider_id,
     provider_name: r.provider_name,
     total_amount: Number(r.total_amount),

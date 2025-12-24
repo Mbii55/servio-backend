@@ -8,13 +8,14 @@ dotenv.config();
 const PORT = process.env.PORT || 5000;
 
 // Test database connection
-pool.query('SELECT NOW()', (err, res) => {
+pool.query("SELECT NOW()", (err: Error | null, res: any) => {
   if (err) {
-    console.error('❌ Database connection failed:', err);
+    console.error("❌ Database connection failed:", err);
   } else {
-    console.log('✅ Database connected at:', res.rows[0].now);
+    console.log("✅ Database connected at:", res.rows[0].now);
   }
 });
+
 
 // Start server
 app.listen(PORT, () => {

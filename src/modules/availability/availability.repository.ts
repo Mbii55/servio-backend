@@ -240,5 +240,5 @@ export async function listBookedTimesForDate(
   );
 
   // Return times as "HH:MM"
-  return res.rows.map((row) => row.scheduled_time.substring(0, 5));
+  return res.rows.map((row:any) => row.scheduled_time.substring(0, 5));
 }
