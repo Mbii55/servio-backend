@@ -1,6 +1,8 @@
+// src/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { UserRole } from "../modules/users/user.types";
+import { findUserById } from "../modules/users/user.repository";
 
 export interface AuthPayload {
   userId: string;
@@ -8,8 +10,11 @@ export interface AuthPayload {
   role: UserRole;
 }
 
+const SUSPENDED_MESSAGE =
+  "Your account is suspended due to suspicious activity, contact our support team at support@servio.com.";
+
 export function auth(requiredRole: UserRole | null = null) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -28,13 +33,25 @@ export function auth(requiredRole: UserRole | null = null) {
       }
 
       const payload = jwt.verify(token, secret) as AuthPayload;
-      (req as any).user = payload; // or use your type augmentation
+
+      // ✅ Fetch user to enforce suspended status
+      const user = await findUserById(payload.userId);
+      if (!user) {
+        return res.status(401).json({ message: "User not found" });
+      }
+
+      // ✅ Block suspended users globally
+      if (user.status === "suspended") {
+        return res.status(403).json({ message: SUSPENDED_MESSAGE });
+      }
+
+      (req as any).user = payload;
 
       if (requiredRole && payload.role !== requiredRole) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
-      next();
+      return next();
     } catch (err) {
       return res.status(401).json({ message: "Invalid or expired token" });
     }

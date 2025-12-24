@@ -2,20 +2,22 @@
 import pool from "../../config/database";
 import {
   Service,
+  ServiceWithProvider,
   CreateServiceInput,
   UpdateServiceInput,
 } from "./service.types";
 import {
   deleteCloudinaryImageByUrl,
-} from "../../utils/cloudinary-delete-by-url"; // ⬅️ new import
+} from "../../utils/cloudinary-delete-by-url";
 
 export async function listActiveServices(params: {
   categoryId?: string;
+  providerId?: string; // ✅ NEW
   search?: string;
   limit?: number;
   offset?: number;
 }): Promise<Service[]> {
-  const { categoryId, search, limit = 20, offset = 0 } = params;
+  const { categoryId, providerId, search, limit = 20, offset = 0 } = params;
 
   const conditions: string[] = ["is_active = true"];
   const values: any[] = [];
@@ -26,15 +28,18 @@ export async function listActiveServices(params: {
     values.push(categoryId);
   }
 
+  if (providerId) {
+    conditions.push(`provider_id = $${index++}`);
+    values.push(providerId);
+  }
+
   if (search) {
     conditions.push(`(title ILIKE $${index} OR description ILIKE $${index})`);
     values.push(`%${search}%`);
     index++;
   }
 
-  const whereClause = conditions.length
-    ? `WHERE ${conditions.join(" AND ")}`
-    : "";
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const query = `
     SELECT *
@@ -49,17 +54,49 @@ export async function listActiveServices(params: {
   return result.rows;
 }
 
-export async function getServiceById(id: string): Promise<Service | null> {
-  const result = await pool.query<Service>(
-    `SELECT * FROM services WHERE id = $1 LIMIT 1`,
+
+export async function getServiceById(id: string): Promise<ServiceWithProvider | null> {
+  const result = await pool.query<ServiceWithProvider>(
+    `
+    SELECT
+      s.*,
+      jsonb_build_object(
+        'id', u.id,
+        'first_name', u.first_name,
+        'last_name', u.last_name,
+        'phone', u.phone,
+        'profile_image', u.profile_image,
+        'business_profile', CASE
+          WHEN bp.user_id IS NULL THEN NULL
+          ELSE jsonb_build_object(
+            'business_name', bp.business_name,
+            'business_logo', bp.business_logo,
+            'business_description', bp.business_description,
+            'business_email', bp.business_email,
+            'business_phone', bp.business_phone,
+            'street_address', bp.street_address,
+            'city', bp.city,
+            'state', bp.state,
+            'postal_code', bp.postal_code,
+            'country', bp.country,
+            'latitude', bp.latitude,
+            'longitude', bp.longitude
+          )
+        END
+      ) AS provider
+    FROM services s
+    JOIN users u ON u.id = s.provider_id
+    LEFT JOIN business_profiles bp ON bp.user_id = u.id
+    WHERE s.id = $1
+    LIMIT 1
+    `,
     [id]
   );
+
   return result.rows[0] || null;
 }
 
-export async function listServicesByProvider(
-  providerId: string
-): Promise<Service[]> {
+export async function listServicesByProvider(providerId: string): Promise<Service[]> {
   const result = await pool.query<Service>(
     `SELECT * FROM services WHERE provider_id = $1 ORDER BY created_at DESC`,
     [providerId]

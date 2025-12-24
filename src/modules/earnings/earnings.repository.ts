@@ -35,6 +35,19 @@ export interface MonthlyEarnings {
   completed_bookings: number;
 }
 
+export interface AdminEarningsSummary {
+  total_commission: number;
+  total_provider_payout: number;
+}
+
+export interface AdminEarningsByProviderRow {
+  provider_id: string;
+  provider_name: string;
+  total_amount: number;
+  total_commission: number;
+  total_net: number;
+}
+
 export async function getEarningsSummary(providerId: string): Promise<EarningsSummary> {
   const result = await pool.query<EarningsSummary>(
     `
@@ -105,4 +118,94 @@ export async function getMonthlyEarnings(providerId: string): Promise<MonthlyEar
   );
 
   return result.rows;
+}
+
+export async function adminEarningsSummary(
+  from?: string,
+  to?: string
+): Promise<AdminEarningsSummary> {
+  const params: any[] = [];
+  let where = "";
+
+  if (from) {
+    params.push(from);
+    where += ` AND e.created_at >= $${params.length}`;
+  }
+  if (to) {
+    params.push(to);
+    where += ` AND e.created_at <= $${params.length}`;
+  }
+
+  const q = `
+    SELECT
+      COALESCE(SUM(e.commission), 0) AS total_commission,
+      COALESCE(SUM(e.net_amount), 0) AS total_provider_payout
+    FROM earnings e
+    WHERE 1=1 ${where}
+  `;
+
+  const res = await pool.query(q, params);
+  return {
+    total_commission: Number(res.rows[0].total_commission),
+    total_provider_payout: Number(res.rows[0].total_provider_payout),
+  };
+}
+
+export async function adminEarningsByProvider(
+  from?: string,
+  to?: string
+): Promise<AdminEarningsByProviderRow[]> {
+  const params: any[] = [];
+  let where = "";
+
+  if (from) {
+    params.push(from);
+    where += ` AND e.created_at >= $${params.length}`;
+  }
+  if (to) {
+    params.push(to);
+    where += ` AND e.created_at <= $${params.length}`;
+  }
+
+  const q = `
+    SELECT
+      u.id AS provider_id,
+      (u.first_name || ' ' || u.last_name) AS provider_name,
+      SUM(e.amount) AS total_amount,
+      SUM(e.commission) AS total_commission,
+      SUM(e.net_amount) AS total_net
+    FROM earnings e
+    JOIN users u ON u.id = e.provider_id
+    WHERE 1=1 ${where}
+    GROUP BY u.id, provider_name
+    ORDER BY total_commission DESC
+  `;
+
+  const res = await pool.query(q, params);
+  return res.rows.map(r => ({
+    provider_id: r.provider_id,
+    provider_name: r.provider_name,
+    total_amount: Number(r.total_amount),
+    total_commission: Number(r.total_commission),
+    total_net: Number(r.total_net),
+  }));
+}
+
+export async function createEarningsForBooking(params: {
+  providerId: string;
+  bookingId: string;
+  amount: number;
+  commission: number;
+  netAmount: number;
+}) {
+  const { providerId, bookingId, amount, commission, netAmount } = params;
+
+  await pool.query(
+    `
+    INSERT INTO earnings (provider_id, booking_id, amount, commission, net_amount)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (booking_id) DO NOTHING
+    `,
+    [providerId, bookingId, amount, commission, netAmount]
+  );
 }

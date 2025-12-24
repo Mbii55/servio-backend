@@ -92,6 +92,19 @@ export async function updateAddress(
   userId: string,
   input: UpdateAddressInput
 ): Promise<Address | null> {
+  // FIRST: If setting as default, unset all other defaults
+  if (input.is_default === true) {
+    await pool.query(
+      `
+      UPDATE addresses
+      SET is_default = false
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
+  }
+
+  // THEN: Update the specific address
   const fields: string[] = [];
   const values: any[] = [];
   let index = 1;
@@ -147,23 +160,7 @@ export async function updateAddress(
   values.push(id, userId);
 
   const result = await pool.query<Address>(query, values);
-  const updated = result.rows[0];
-
-  if (!updated) return null;
-
-  // handle default switching
-  if (input.is_default === true) {
-    await pool.query(
-      `
-      UPDATE addresses
-      SET is_default = false
-      WHERE user_id = $1 AND id <> $2
-      `,
-      [userId, id]
-    );
-  }
-
-  return updated;
+  return result.rows[0] || null;
 }
 
 export async function deleteAddress(

@@ -7,6 +7,7 @@ import {
   findUserByEmail,
   findUserById,
   updateLastLogin,
+  updateUserProfile,
 } from "../users/user.repository";
 import { UserRole } from "../users/user.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
@@ -14,6 +15,7 @@ import {
   createBusinessProfile, 
   getBusinessProfileByUserId 
 } from '../businessProfiles/businessProfile.repository';
+import { updateUserPushToken } from "../users/user.repository";
 
 const DEFAULT_ROLE: UserRole = "customer";
 
@@ -96,6 +98,8 @@ export const register = async (req: Request, res: Response) => {
   }
 };
 
+const SUSPENDED_MESSAGE =
+  "Your account is suspended due to suspicious activity, contact our support team at support@servio.com.";
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password }: { email: string; password: string } = req.body;
@@ -109,11 +113,15 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Invalid credentials" });
     }
 
+    // ✅ BLOCK SUSPENDED USERS (BEFORE password check)
+    if (user.status === "suspended") {
+      return res.status(403).json({ message: SUSPENDED_MESSAGE });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
-
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       console.error("JWT_SECRET is not set");
@@ -191,6 +199,76 @@ export const getMe = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("getMe error:", error);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+export const updateMe = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as AuthPayload | undefined;
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { first_name, last_name, phone, profile_image } = req.body as {
+      first_name?: string;
+      last_name?: string;
+      phone?: string | null;
+      profile_image?: string | null;
+    };
+
+    // Basic validation (keep it simple)
+    if (first_name !== undefined && !String(first_name).trim()) {
+      return res.status(400).json({ error: "first_name cannot be empty" });
+    }
+    if (last_name !== undefined && !String(last_name).trim()) {
+      return res.status(400).json({ error: "last_name cannot be empty" });
+    }
+
+    const updated = await updateUserProfile(user.userId, {
+      first_name: first_name?.trim(),
+      last_name: last_name?.trim(),
+      phone: phone === undefined ? undefined : phone,
+      profile_image: profile_image === undefined ? undefined : profile_image,
+    });
+
+    // if nothing updated, just return current
+    if (!updated) {
+      const current = await findUserById(user.userId);
+      return res.json({ user: current });
+    }
+
+    return res.json({ user: updated });
+  } catch (e: any) {
+    console.error("updateMe error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+export const savePushToken = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user as AuthPayload | undefined;
+    if (!authUser) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { expo_push_token } = req.body as { expo_push_token?: string };
+
+    if (!expo_push_token || typeof expo_push_token !== "string") {
+      return res.status(400).json({ error: "expo_push_token is required" });
+    }
+
+    // Optional: basic validation for Expo format
+    if (!expo_push_token.startsWith("ExponentPushToken[") && !expo_push_token.startsWith("ExpoPushToken[")) {
+      return res.status(400).json({ error: "Invalid Expo push token format" });
+    }
+
+    const updated = await updateUserPushToken(authUser.userId, expo_push_token);
+    if (!updated) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.json({ ok: true });
+  } catch (error: any) {
+    console.error("savePushToken error:", error);
     return res.status(500).json({ error: "Server error" });
   }
 };

@@ -2,6 +2,7 @@
 import pool from "../../config/database";
 import { Booking, BookingStatus, BookingAddonInput } from "./booking.types";
 import { getCommissionRateForProvider } from "../businessProfiles/businessProfile.repository";
+import { createEarningsForBooking } from "../earnings/earnings.repository";
 
 export async function createBookingWithAddons(params: {
   customerId: string;
@@ -44,9 +45,7 @@ export async function createBookingWithAddons(params: {
     );
 
     const service = serviceRes.rows[0];
-    if (!service) {
-      throw new Error("Service not found");
-    }
+    if (!service) throw new Error("Service not found");
 
     const basePrice = Number(service.base_price);
     const providerId = service.provider_id;
@@ -54,7 +53,6 @@ export async function createBookingWithAddons(params: {
     // Calculate addons price and prepare snapshots
     let addonsPrice = 0;
     type AddonRow = { id: string; name: string; price: string };
-
     let addonRows: AddonRow[] = [];
 
     if (addons.length > 0) {
@@ -149,13 +147,7 @@ export async function createBookingWithAddons(params: {
           )
           VALUES ($1,$2,$3,$4,$5)
           `,
-          [
-            booking.id,
-            dbAddon.id,
-            dbAddon.name,
-            dbAddon.price,
-            qty,
-          ]
+          [booking.id, dbAddon.id, dbAddon.name, dbAddon.price, qty]
         );
       }
     }
@@ -170,37 +162,111 @@ export async function createBookingWithAddons(params: {
   }
 }
 
-export async function getBookingById(id: string): Promise<Booking | null> {
-  const res = await pool.query<Booking>(
-    `SELECT * FROM bookings WHERE id = $1 LIMIT 1`,
+export async function getBookingById(id: string): Promise<any | null> {
+  const res = await pool.query(
+    `
+    SELECT
+      b.*,
+
+      -- service info
+      s.title AS service_title,
+      s.images AS service_images,
+
+      -- provider business info
+      bp.business_name AS provider_business_name,
+      bp.business_logo AS provider_business_logo,
+      bp.business_phone AS provider_business_phone,
+      bp.business_email AS provider_business_email,
+      bp.street_address AS provider_street_address,
+      bp.city AS provider_city,
+      bp.country AS provider_country,
+
+      -- addons list as JSON array
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', ba.id,
+            'addon_id', ba.addon_id,
+            'addon_name', ba.addon_name,
+            'addon_price', ba.addon_price,
+            'quantity', ba.quantity
+          )
+        ) FILTER (WHERE ba.id IS NOT NULL),
+        '[]'::json
+      ) AS addons
+
+    FROM bookings b
+    JOIN services s ON s.id = b.service_id
+    LEFT JOIN business_profiles bp ON bp.user_id = b.provider_id
+    LEFT JOIN booking_addons ba ON ba.booking_id = b.id
+    WHERE b.id = $1
+    GROUP BY
+      b.id,
+      s.title, s.images,
+      bp.business_name, bp.business_logo, bp.business_phone, bp.business_email,
+      bp.street_address, bp.city, bp.country
+    LIMIT 1
+    `,
     [id]
   );
+
   return res.rows[0] || null;
 }
 
-export async function listBookingsForUser(userId: string, role: "customer" | "provider" | "admin"): Promise<Booking[]> {
-  if (role === "admin") {
-    const res = await pool.query<Booking>(
-      `
-      SELECT *
-      FROM bookings
-      ORDER BY created_at DESC
-      `
-    );
-    return res.rows;
-  }
 
-  const column = role === "customer" ? "customer_id" : "provider_id";
+/**
+ * ✅ UPDATED: list bookings + include service title/images + provider shop name/logo
+ * Returns rows with extra fields:
+ * - service_title, service_images
+ * - provider_business_name, provider_business_logo
+ * - provider_first_name, provider_last_name
+ */
+export async function listBookingsForUser(
+  userId: string,
+  role: "customer" | "provider" | "admin"
+): Promise<any[]> {
+  const where =
+    role === "admin"
+      ? ""
+      : role === "customer"
+      ? "WHERE b.customer_id = $1"
+      : "WHERE b.provider_id = $1";
 
-  const res = await pool.query<Booking>(
+  const values: any[] = role === "admin" ? [] : [userId];
+
+  const res = await pool.query(
     `
-    SELECT *
-    FROM bookings
-    WHERE ${column} = $1
-    ORDER BY created_at DESC
+    SELECT
+      b.*,
+
+      -- service info
+      s.title AS service_title,
+      s.images AS service_images,
+
+      -- provider user fallback
+      pu.first_name AS provider_first_name,
+      pu.last_name  AS provider_last_name,
+
+      -- provider shop info
+      bp.business_name AS provider_business_name,
+      bp.business_logo AS provider_business_logo
+
+    FROM bookings b
+    LEFT JOIN services s
+      ON s.id = b.service_id
+
+    LEFT JOIN users pu
+      ON pu.id = b.provider_id
+
+    LEFT JOIN business_profiles bp
+      ON bp.user_id = b.provider_id
+
+    ${where}
+    ORDER BY b.created_at DESC
     `,
-    [userId]
+    values
   );
+
   return res.rows;
 }
 
@@ -221,6 +287,9 @@ export async function updateBookingStatus(
     provider_notes?: string;
   }
 ): Promise<Booking | null> {
+  /* ======================================================
+     1. Fetch existing booking
+  ====================================================== */
   const existingRes = await pool.query<Booking>(
     `SELECT * FROM bookings WHERE id = $1 LIMIT 1`,
     [id]
@@ -228,11 +297,19 @@ export async function updateBookingStatus(
   const existing = existingRes.rows[0];
   if (!existing) return null;
 
+  /* ======================================================
+     2. Validate status transition
+  ====================================================== */
   const allowed = VALID_TRANSITIONS[existing.status] || [];
   if (!allowed.includes(newStatus)) {
-    throw new Error(`Invalid status transition from ${existing.status} to ${newStatus}`);
+    throw new Error(
+      `Invalid status transition from ${existing.status} to ${newStatus}`
+    );
   }
 
+  /* ======================================================
+     3. Build update query
+  ====================================================== */
   const { cancellation_reason, provider_notes } = options;
 
   const setParts: string[] = ["status = $1"];
@@ -249,28 +326,161 @@ export async function updateBookingStatus(
     values.push(provider_notes);
   }
 
-  // timestamps depending on newStatus
   if (newStatus === "accepted") {
     setParts.push(`accepted_at = CURRENT_TIMESTAMP`);
   }
+
   if (newStatus === "in_progress") {
     setParts.push(`started_at = CURRENT_TIMESTAMP`);
   }
+
   if (newStatus === "completed") {
     setParts.push(`completed_at = CURRENT_TIMESTAMP`);
   }
+
   if (newStatus === "cancelled") {
     setParts.push(`cancelled_at = CURRENT_TIMESTAMP`);
   }
 
   const query = `
     UPDATE bookings
-    SET ${setParts.join(", ")}
+    SET ${setParts.join(", ")}, updated_at = CURRENT_TIMESTAMP
     WHERE id = $${index}
     RETURNING *
   `;
   values.push(id);
 
+  /* ======================================================
+     4. Execute update
+  ====================================================== */
   const res = await pool.query<Booking>(query, values);
-  return res.rows[0] || null;
+  const updated = res.rows[0] || null;
+
+  /* ======================================================
+     5. Create earnings on COMPLETED
+     (idempotent, safe)
+  ====================================================== */
+  if (updated && newStatus === "completed") {
+    await createEarningsForBooking({
+      providerId: updated.provider_id,
+      bookingId: updated.id,
+      amount: Number(updated.subtotal),
+      commission: Number(updated.commission_amount),
+      netAmount: Number(updated.provider_earnings),
+    });
+  }
+
+  return updated;
+}
+
+export type ProviderBookingDetails = Booking & {
+  customer: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string | null;
+    profile_image: string | null;
+  };
+  service: {
+    id: string;
+    title: string;
+    description: string;
+    base_price: string;
+    duration_minutes: number | null;
+    images: any; // JSONB from Postgres (array)
+    category_id: string;
+  };
+  address: null | {
+    id: string;
+    label: string | null;
+    street_address: string;
+    city: string;
+    state: string | null;
+    postal_code: string | null;
+    country: string;
+    latitude: string | null;  // DECIMAL -> string
+    longitude: string | null; // DECIMAL -> string
+    is_default: boolean;
+  };
+  booking_addons: Array<{
+    id: string;
+    addon_id: string;
+    addon_name: string;
+    addon_price: string;
+    quantity: number;
+  }>;
+};
+
+export async function listProviderBookingsDetailed(
+  providerId: string
+): Promise<ProviderBookingDetails[]> {
+  const result = await pool.query<ProviderBookingDetails>(
+    `
+    SELECT
+      b.*,
+
+      json_build_object(
+        'id', c.id,
+        'first_name', c.first_name,
+        'last_name', c.last_name,
+        'email', c.email,
+        'phone', c.phone,
+        'profile_image', c.profile_image
+      ) AS customer,
+
+      json_build_object(
+        'id', s.id,
+        'title', s.title,
+        'description', s.description,
+        'base_price', s.base_price,
+        'duration_minutes', s.duration_minutes,
+        'images', s.images,
+        'category_id', s.category_id
+      ) AS service,
+
+      CASE
+        WHEN a.id IS NULL THEN NULL
+        ELSE json_build_object(
+          'id', a.id,
+          'label', a.label,
+          'street_address', a.street_address,
+          'city', a.city,
+          'state', a.state,
+          'postal_code', a.postal_code,
+          'country', a.country,
+          'latitude', a.latitude,
+          'longitude', a.longitude,
+          'is_default', a.is_default
+        )
+      END AS address,
+
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', ba.id,
+            'addon_id', ba.addon_id,
+            'addon_name', ba.addon_name,
+            'addon_price', ba.addon_price,
+            'quantity', ba.quantity
+          )
+        ) FILTER (WHERE ba.id IS NOT NULL),
+        '[]'::json
+      ) AS booking_addons
+
+    FROM bookings b
+    JOIN users c ON c.id = b.customer_id
+    JOIN services s ON s.id = b.service_id
+    LEFT JOIN addresses a ON a.id = b.address_id
+    LEFT JOIN booking_addons ba ON ba.booking_id = b.id
+
+    WHERE b.provider_id = $1
+
+    GROUP BY b.id, c.id, s.id, a.id
+    ORDER BY b.created_at DESC
+    `,
+    [providerId]
+  );
+
+  return result.rows;
 }

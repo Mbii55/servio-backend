@@ -10,16 +10,17 @@ import {
 } from "./service.repository";
 import { CreateServiceInput, UpdateServiceInput } from "./service.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
-
+ 
 // 🔹 Image limit for each service
 const MAX_SERVICE_IMAGES = 5;
 
 export const listServicesHandler = async (req: Request, res: Response) => {
   try {
-    const { categoryId, search, limit, offset } = req.query;
+    const { categoryId, providerId, search, limit, offset } = req.query;
 
     const services = await listActiveServices({
       categoryId: categoryId as string | undefined,
+      providerId: providerId as string | undefined,
       search: search as string | undefined,
       limit: limit ? Number(limit) : 20,
       offset: offset ? Number(offset) : 0,
@@ -31,6 +32,7 @@ export const listServicesHandler = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Server error" });
   }
 };
+
 
 export const getServiceHandler = async (req: Request, res: Response) => {
   try {

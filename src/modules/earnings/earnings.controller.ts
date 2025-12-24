@@ -1,11 +1,19 @@
 // src/modules/earnings/earnings.controller.ts
 import { Request, Response } from "express";
 import { AuthPayload } from "../../middleware/auth.middleware";
+
+// Provider-level repository functions
 import {
   getEarningsSummary,
   getEarningsTransactions,
   getMonthlyEarnings,
+  adminEarningsSummary,
+  adminEarningsByProvider,
 } from "./earnings.repository";
+
+/* ======================================================
+   PROVIDER / ADMIN — PERSONAL EARNINGS
+====================================================== */
 
 export const getEarningsSummaryHandler = async (req: Request, res: Response) => {
   try {
@@ -26,7 +34,10 @@ export const getEarningsSummaryHandler = async (req: Request, res: Response) => 
   }
 };
 
-export const getEarningsTransactionsHandler = async (req: Request, res: Response) => {
+export const getEarningsTransactionsHandler = async (
+  req: Request,
+  res: Response
+) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
     if (!user) {
@@ -45,7 +56,10 @@ export const getEarningsTransactionsHandler = async (req: Request, res: Response
   }
 };
 
-export const getMonthlyEarningsHandler = async (req: Request, res: Response) => {
+export const getMonthlyEarningsHandler = async (
+  req: Request,
+  res: Response
+) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
     if (!user) {
@@ -60,6 +74,24 @@ export const getMonthlyEarningsHandler = async (req: Request, res: Response) => 
     return res.json(monthlyData);
   } catch (err) {
     console.error("getMonthlyEarningsHandler error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ======================================================
+   ADMIN — GLOBAL EARNINGS OVERVIEW
+====================================================== */
+
+export const adminEarningsOverview = async (req: Request, res: Response) => {
+  try {
+    const { from, to } = req.query as { from?: string; to?: string };
+
+    const summary = await adminEarningsSummary(from, to);
+    const byProvider = await adminEarningsByProvider(from, to);
+
+    return res.json({ summary, byProvider });
+  } catch (err) {
+    console.error("adminEarningsOverview error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 };

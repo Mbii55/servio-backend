@@ -9,6 +9,8 @@ import {
 import { BookingStatus } from "./booking.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
 import { Server } from "socket.io";
+import { listProviderBookingsDetailed } from "./booking.repository";
+import { createNotification } from "../notifications/notification.repository";
 
 export const createBookingHandler = async (req: Request, res: Response) => {
   try {
@@ -50,8 +52,42 @@ export const createBookingHandler = async (req: Request, res: Response) => {
       customer_notes,
     });
 
+    // ✅ Create notification for provider (partner)
+    // booking must include provider_id + id. If not, tell me and I’ll adjust.
+    if ((booking as any)?.provider_id) {
+      const bookingId = (booking as any).id;
+      const providerId = (booking as any).provider_id;
+      const bookingNumber = (booking as any).booking_number;
+
+      await createNotification({
+        user_id: providerId,
+        type: "booking_created",
+        title: "New booking request",
+        message: bookingNumber
+          ? `You received a new booking request (${bookingNumber}).`
+          : "You received a new booking request.",
+        data: {
+          booking_id: bookingId,
+          service_id: service_id,
+          customer_id: user.userId,
+        },
+      });
+    }
+
+    // ✅ Socket emit (keep)
     const io = req.app.get("io") as Server | undefined;
-    io?.emit("booking:created", booking);
+
+    // Better: emit to that provider only (room), fallback to global if you haven't implemented rooms yet
+    const providerId = (booking as any)?.provider_id;
+    if (providerId) {
+      io?.to(`provider:${providerId}`).emit("booking:created", booking);
+      io?.to(`provider:${providerId}`).emit("notification:new", {
+        type: "booking_created",
+        booking_id: (booking as any)?.id,
+      });
+    } else {
+      io?.emit("booking:created", booking);
+    }
 
     return res.status(201).json(booking);
   } catch (error: any) {
@@ -59,6 +95,7 @@ export const createBookingHandler = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Server error", detail: error.message });
   }
 };
+
 
 export const listMyBookingsHandler = async (req: Request, res: Response) => {
   try {
@@ -132,6 +169,27 @@ export const updateBookingStatusHandler = async (req: Request, res: Response) =>
     if (error.message?.startsWith("Invalid status transition")) {
       return res.status(400).json({ message: error.message });
     }
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const listProviderBookingsDetailedHandler = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as AuthPayload | undefined;
+    if (!user) return res.status(401).json({ message: "Unauthorized" });
+
+    // provider-only (or allow admin if you want)
+    if (user.role !== "provider" && user.role !== "admin") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    // Provider sees only their bookings
+    const providerId = user.userId;
+
+    const data = await listProviderBookingsDetailed(providerId);
+    return res.json(data);
+  } catch (error) {
+    console.error("listProviderBookingsDetailedHandler error:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };

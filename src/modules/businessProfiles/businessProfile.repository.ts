@@ -1,6 +1,10 @@
 // src/modules/businessProfiles/businessProfile.repository.ts
 import pool from "../../config/database";
 
+/* ======================================================
+   TYPES
+====================================================== */
+
 export interface CreateBusinessProfileInput {
   userId: string;
   businessName: string;
@@ -36,27 +40,37 @@ export interface BusinessProfile {
   updated_at: string;
 }
 
+/* ======================================================
+   CREATE
+====================================================== */
+
 export async function createBusinessProfile(
   input: CreateBusinessProfileInput
 ): Promise<BusinessProfile> {
   const result = await pool.query(
-    `INSERT INTO business_profiles 
+    `
+    INSERT INTO business_profiles 
       (user_id, business_name, business_description, business_logo, country, commission_rate, is_active) 
-     VALUES ($1, $2, $3, $4, $5, $6, $7) 
-     RETURNING *`,
+    VALUES ($1, $2, $3, $4, $5, $6, $7) 
+    RETURNING *
+    `,
     [
       input.userId,
       input.businessName,
       input.businessDescription || null,
       input.businessLogo || null,
-      'Qatar',
-      15.00, // Default commission rate
-      true
+      "Qatar",
+      15.0,
+      true,
     ]
   );
 
   return result.rows[0];
 }
+
+/* ======================================================
+   READ (PROVIDER)
+====================================================== */
 
 export async function getBusinessProfileByUserId(
   userId: string
@@ -68,6 +82,10 @@ export async function getBusinessProfileByUserId(
 
   return result.rows[0] || null;
 }
+
+/* ======================================================
+   UPDATE (PROVIDER)
+====================================================== */
 
 export async function updateBusinessProfile(
   userId: string,
@@ -89,7 +107,7 @@ export async function updateBusinessProfile(
 
   if (updates.businessLogo !== undefined) {
     fields.push(`business_logo = $${paramCount++}`);
-    values.push(updates.businessLogo || null); // Allow null to remove logo
+    values.push(updates.businessLogo || null);
   }
 
   if (fields.length === 0) {
@@ -99,15 +117,21 @@ export async function updateBusinessProfile(
   values.push(userId);
 
   const result = await pool.query(
-    `UPDATE business_profiles 
-     SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP 
-     WHERE user_id = $${paramCount} 
-     RETURNING *`,
+    `
+    UPDATE business_profiles 
+    SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP 
+    WHERE user_id = $${paramCount}
+    RETURNING *
+    `,
     values
   );
 
   return result.rows[0] || null;
 }
+
+/* ======================================================
+   COMMISSION
+====================================================== */
 
 export async function getCommissionRateForProvider(
   providerId: string
@@ -118,8 +142,67 @@ export async function getCommissionRateForProvider(
   );
 
   if (result.rows.length === 0) {
-    return 15.0; // default 15%
+    return 15.0;
   }
 
   return parseFloat(result.rows[0].commission_rate);
+}
+
+/* ======================================================
+   ADMIN — PROVIDER REVIEW
+====================================================== */
+
+export interface AdminProviderProfileRow {
+  id: string;
+  business_name: string;
+  is_active: boolean;
+  city: string | null;
+  country: string;
+  created_at: string;
+  user_id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+/* Admin: list all provider business profiles */
+export async function adminListProviderProfiles(): Promise<
+  AdminProviderProfileRow[]
+> {
+  const result = await pool.query(
+    `
+    SELECT
+      bp.id,
+      bp.business_name,
+      bp.is_active,
+      bp.city,
+      bp.country,
+      bp.created_at,
+      u.id AS user_id,
+      u.email,
+      u.first_name,
+      u.last_name
+    FROM business_profiles bp
+    JOIN users u ON u.id = bp.user_id
+    WHERE u.role = 'provider'
+    ORDER BY bp.created_at DESC
+    `
+  );
+
+  return result.rows;
+}
+
+/* Admin: activate / deactivate provider business */
+export async function adminSetBusinessActive(
+  businessProfileId: string,
+  isActive: boolean
+): Promise<void> {
+  await pool.query(
+    `
+    UPDATE business_profiles
+    SET is_active = $1, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $2
+    `,
+    [isActive, businessProfileId]
+  );
 }

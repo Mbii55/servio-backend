@@ -7,10 +7,14 @@ import serviceRoutes from "./modules/services/service.routes";
 import addressRoutes from "./modules/addresses/address.routes";
 import bookingRoutes from "./modules/bookings/booking.routes";
 import availabilityRoutes from "./modules/availability/availability.routes";
-import profileRoutes from "./modules/profile/profile.routes";
 import earningsRoutes from "./modules/earnings/arnings.routes";
 import uploadRoutes from "./modules/upload/upload.routes";
 import addonRoutes from "./modules/addons/addon.routes";
+import profileRoutes from "./modules/profile/profile.routes";
+import favoriteRoutes from "./modules/favorites/favorite.routes";
+import notificationRoutes from "./modules/notifications/notification.routes";
+import usersRoutes from "./modules/users/user.routes";
+import businessProfilesRoutes from "./modules/businessProfiles/business_profiles.routes";
 
 const app: Application = express();
 
@@ -40,5 +44,10 @@ app.use("/api/v1/profile", profileRoutes);
 app.use("/api/v1/earnings", earningsRoutes);
 app.use("/api/v1/upload", uploadRoutes);
 app.use("/api/v1/addons", addonRoutes);
+app.use("/api/v1/favorites", favoriteRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
+app.use("/api/v1/users", usersRoutes);
+app.use("/api/v1/businessProfiles", businessProfilesRoutes);
+
 
 export default app;
