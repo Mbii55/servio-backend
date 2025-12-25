@@ -287,90 +287,129 @@ export async function updateBookingStatus(
     provider_notes?: string;
   }
 ): Promise<Booking | null> {
-  /* ======================================================
-     1. Fetch existing booking
-  ====================================================== */
-  const existingRes = await pool.query<Booking>(
-    `SELECT * FROM bookings WHERE id = $1 LIMIT 1`,
-    [id]
-  );
-  const existing = existingRes.rows[0];
-  if (!existing) return null;
+  const client = await pool.connect();
+  
+  try {
+    await client.query("BEGIN");
 
-  /* ======================================================
-     2. Validate status transition
-  ====================================================== */
-  const allowed = VALID_TRANSITIONS[existing.status as BookingStatus] || [];
-  if (!allowed.includes(newStatus)) {
-    throw new Error(
-      `Invalid status transition from ${existing.status} to ${newStatus}`
+    /* ======================================================
+       1. Fetch existing booking
+    ====================================================== */
+    const existingRes = await client.query<Booking>(
+      `SELECT * FROM bookings WHERE id = $1 LIMIT 1`,
+      [id]
     );
+    const existing = existingRes.rows[0];
+    if (!existing) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    /* ======================================================
+       2. Validate status transition
+    ====================================================== */
+    const allowed = VALID_TRANSITIONS[existing.status as BookingStatus] || [];
+    if (!allowed.includes(newStatus)) {
+      await client.query("ROLLBACK");
+      throw new Error(
+        `Invalid status transition from ${existing.status} to ${newStatus}`
+      );
+    }
+
+    /* ======================================================
+       3. Build update query
+    ====================================================== */
+    const { cancellation_reason, provider_notes } = options;
+
+    const setParts: string[] = ["status = $1"];
+    const values: any[] = [newStatus];
+    let index = 2;
+
+    if (cancellation_reason !== undefined) {
+      setParts.push(`cancellation_reason = $${index++}`);
+      values.push(cancellation_reason);
+    }
+
+    if (provider_notes !== undefined) {
+      setParts.push(`provider_notes = $${index++}`);
+      values.push(provider_notes);
+    }
+
+    if (newStatus === "accepted") {
+      setParts.push(`accepted_at = CURRENT_TIMESTAMP`);
+    }
+
+    if (newStatus === "in_progress") {
+      setParts.push(`started_at = CURRENT_TIMESTAMP`);
+    }
+
+    if (newStatus === "completed") {
+      setParts.push(`completed_at = CURRENT_TIMESTAMP`);
+    }
+
+    if (newStatus === "cancelled") {
+      setParts.push(`cancelled_at = CURRENT_TIMESTAMP`);
+    }
+
+    const query = `
+      UPDATE bookings
+      SET ${setParts.join(", ")}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $${index}
+      RETURNING *
+    `;
+    values.push(id);
+
+    /* ======================================================
+       4. Execute update
+    ====================================================== */
+    const res = await client.query<Booking>(query, values);
+    const updated = res.rows[0] || null;
+
+    if (!updated) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    /* ======================================================
+       5. Create earnings on COMPLETED
+    ====================================================== */
+    if (updated && newStatus === "completed") {
+      try {
+        const existingCheck = await client.query(
+          `SELECT id FROM earnings WHERE booking_id = $1`,
+          [updated.id]
+        );
+
+        if (existingCheck.rows.length === 0) {
+          const earningsResult = await client.query(
+            `
+            INSERT INTO earnings (provider_id, booking_id, amount, commission, net_amount)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            `,
+            [
+              updated.provider_id,
+              updated.id,
+              Number(updated.subtotal),
+              Number(updated.commission_amount),
+              Number(updated.provider_earnings)
+            ]
+          );
+        }
+      } catch (earningsError) {
+        // Continue with commit - don't rollback booking completion
+      }
+    }
+
+    await client.query("COMMIT");
+    return updated;
+    
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-
-  /* ======================================================
-     3. Build update query
-  ====================================================== */
-  const { cancellation_reason, provider_notes } = options;
-
-  const setParts: string[] = ["status = $1"];
-  const values: any[] = [newStatus];
-  let index = 2;
-
-  if (cancellation_reason !== undefined) {
-    setParts.push(`cancellation_reason = $${index++}`);
-    values.push(cancellation_reason);
-  }
-
-  if (provider_notes !== undefined) {
-    setParts.push(`provider_notes = $${index++}`);
-    values.push(provider_notes);
-  }
-
-  if (newStatus === "accepted") {
-    setParts.push(`accepted_at = CURRENT_TIMESTAMP`);
-  }
-
-  if (newStatus === "in_progress") {
-    setParts.push(`started_at = CURRENT_TIMESTAMP`);
-  }
-
-  if (newStatus === "completed") {
-    setParts.push(`completed_at = CURRENT_TIMESTAMP`);
-  }
-
-  if (newStatus === "cancelled") {
-    setParts.push(`cancelled_at = CURRENT_TIMESTAMP`);
-  }
-
-  const query = `
-    UPDATE bookings
-    SET ${setParts.join(", ")}, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $${index}
-    RETURNING *
-  `;
-  values.push(id);
-
-  /* ======================================================
-     4. Execute update
-  ====================================================== */
-  const res = await pool.query<Booking>(query, values);
-  const updated = res.rows[0] || null;
-
-  /* ======================================================
-     5. Create earnings on COMPLETED
-     (idempotent, safe)
-  ====================================================== */
-  if (updated && newStatus === "completed") {
-    await createEarningsForBooking({
-      providerId: updated.provider_id,
-      bookingId: updated.id,
-      amount: Number(updated.subtotal),
-      commission: Number(updated.commission_amount),
-      netAmount: Number(updated.provider_earnings),
-    });
-  }
-
-  return updated;
 }
 
 export type ProviderBookingDetails = Booking & {

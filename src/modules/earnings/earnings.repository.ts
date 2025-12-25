@@ -197,15 +197,109 @@ export async function createEarningsForBooking(params: {
   amount: number;
   commission: number;
   netAmount: number;
-}) {
+}): Promise<{ success: boolean; error?: string; earningsId?: string }> {
   const { providerId, bookingId, amount, commission, netAmount } = params;
 
-  await pool.query(
-    `
-    INSERT INTO earnings (provider_id, booking_id, amount, commission, net_amount)
-    VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (booking_id) DO NOTHING
-    `,
-    [providerId, bookingId, amount, commission, netAmount]
-  );
+  try {
+    // First, check if booking exists and is completed
+    const bookingCheck = await pool.query(
+      `SELECT id, status FROM bookings WHERE id = $1 AND status = 'completed'`,
+      [bookingId]
+    );
+
+    if (bookingCheck.rows.length === 0) {
+      return { 
+        success: false, 
+        error: 'Booking not found or not completed' 
+      };
+    }
+
+    // Check if earnings already exist for this booking
+    const existingCheck = await pool.query(
+      `SELECT id FROM earnings WHERE booking_id = $1`,
+      [bookingId]
+    );
+
+    if (existingCheck.rows.length > 0) {
+      return { 
+        success: true, 
+        error: 'Earnings already exist', 
+        earningsId: existingCheck.rows[0].id 
+      };
+    }
+
+    // Insert earnings record
+    const result = await pool.query(
+      `
+      INSERT INTO earnings (provider_id, booking_id, amount, commission, net_amount)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id
+      `,
+      [providerId, bookingId, amount, commission, netAmount]
+    );
+
+    if (result.rows.length > 0) {
+      const earningsId = result.rows[0].id;
+      return { success: true, earningsId };
+    } else {
+      return { 
+        success: false, 
+        error: 'No rows returned from insert' 
+      };
+    }
+  } catch (error: any) {
+    console.error('Error creating earnings record:', error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+}
+
+export async function checkEarningsIssues(bookingId: string) {
+  try {
+    console.log('=== Checking earnings issues for booking:', bookingId);
+    
+    // 1. Check if booking exists and is completed
+    const booking = await pool.query(
+      `SELECT id, status, provider_id, subtotal, commission_amount, provider_earnings 
+       FROM bookings WHERE id = $1`,
+      [bookingId]
+    );
+    
+    console.log('Booking check:', booking.rows[0] || 'Not found');
+    
+    // 2. Check if earnings already exist
+    const earnings = await pool.query(
+      `SELECT * FROM earnings WHERE booking_id = $1`,
+      [bookingId]
+    );
+    
+    console.log('Existing earnings:', earnings.rows[0] || 'None');
+    
+    // 3. Check earnings table constraints
+    const constraints = await pool.query(`
+      SELECT 
+        tc.constraint_name,
+        tc.constraint_type,
+        kcu.column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+      WHERE tc.table_name = 'earnings'
+        AND tc.constraint_type = 'UNIQUE';
+    `);
+    
+    console.log('Earnings table unique constraints:', constraints.rows);
+    
+    return {
+      booking: booking.rows[0],
+      existingEarnings: earnings.rows[0],
+      constraints: constraints.rows
+    };
+    
+  } catch (error) {
+    console.error('Error checking earnings issues:', error);
+    throw error;
+  }
 }
