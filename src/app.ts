@@ -49,5 +49,4 @@ app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/businessProfiles", businessProfilesRoutes);
 
-
 export default app;

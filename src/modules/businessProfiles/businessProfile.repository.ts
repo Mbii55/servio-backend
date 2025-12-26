@@ -15,7 +15,7 @@ export interface CreateBusinessProfileInput {
 export interface UpdateBusinessProfileInput {
   businessName?: string;
   businessDescription?: string;
-  businessLogo?: string | null;
+  businessLogo?: string;
 }
 
 export interface BusinessProfile {

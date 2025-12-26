@@ -28,3 +28,47 @@ export interface AdminUserListItem {
   last_name: string;
   created_at: string;
 }
+
+/* 🔹 SERVICE TYPE */
+export interface Service {
+  id: string;
+  title: string;
+  description: string;
+  base_price: number;
+  duration_minutes: number | null;
+  images: string[] | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/* 🔹 PROVIDER BUSINESS INFO */
+export interface ProviderBusinessProfile {
+  id: string;
+  business_name: string;
+  business_description: string | null;
+  business_email: string | null;
+  business_phone: string | null;
+  street_address: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  country: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/* 🔹 PROVIDER PUBLIC PROFILE (for customers to view) */
+export interface ProviderPublicProfile {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  profile_image: string | null;
+  role: UserRole;
+  status: UserStatus;
+  created_at: string;
+  business: ProviderBusinessProfile | null;
+  services: Service[];
+}

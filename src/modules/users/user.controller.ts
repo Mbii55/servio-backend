@@ -40,3 +40,64 @@ export async function adminUpdateUserStatus(req: Request, res: Response) {
     return res.status(500).json({ error: "Server error" });
   }
 }
+
+/* CUSTOMER — GET ALL ACTIVE PROVIDERS WITH SERVICES */
+export async function getProviders(req: Request, res: Response) {
+  try {
+    const providers = await UserRepo.getActiveProvidersWithServices();
+    return res.json({ providers });
+  } catch (err) {
+    console.error("getProviders error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+/* CUSTOMER — GET SINGLE PROVIDER PROFILE WITH SERVICES */
+export async function getProviderProfile(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    
+    const provider = await UserRepo.getProviderProfileWithServices(id);
+    
+    if (!provider) {
+      return res.status(404).json({ 
+        error: "Provider not found or not available" 
+      });
+    }
+    
+    return res.json({ provider });
+  } catch (err) {
+    console.error("getProviderProfile error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+/* CUSTOMER — SEARCH PROVIDERS WITH SERVICES */
+export async function searchProviders(req: Request, res: Response) {
+  try {
+    const { query } = req.query;
+    
+    if (!query || typeof query !== 'string') {
+      // If no search query, return all active providers
+      const providers = await UserRepo.getActiveProvidersWithServices();
+      return res.json({ providers });
+    }
+    
+    const providers = await UserRepo.searchProvidersByName(query);
+    return res.json({ providers });
+  } catch (err) {
+    console.error("searchProviders error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+/* CUSTOMER — GET PROVIDERS WITHOUT SERVICES (LEGACY SUPPORT) */
+export async function getProvidersBasic(req: Request, res: Response) {
+  try {
+    const providers = await UserRepo.getActiveProvidersBasic();
+    return res.json({ providers });
+  } catch (err) {
+    console.error("getProvidersBasic error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
