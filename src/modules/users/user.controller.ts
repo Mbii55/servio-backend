@@ -72,7 +72,7 @@ export async function getProviderProfile(req: Request, res: Response) {
   }
 }
 
-/* CUSTOMER — SEARCH PROVIDERS WITH SERVICES */
+/* CUSTOMER — SEARCH PROVIDERS BY NAME (SIMPLE SEARCH) */
 export async function searchProviders(req: Request, res: Response) {
   try {
     const { query } = req.query;
@@ -88,6 +88,35 @@ export async function searchProviders(req: Request, res: Response) {
   } catch (err) {
     console.error("searchProviders error:", err);
     return res.status(500).json({ error: "Server error" });
+  }
+}
+
+/* CUSTOMER — SEARCH PROVIDERS WITH PAGINATION (ENHANCED SEARCH) */
+export async function searchProvidersAdvanced(req: Request, res: Response) {
+  try {
+    const { query, limit, offset } = req.query;
+
+    const params = {
+      query: query as string | undefined,
+      limit: limit ? parseInt(limit as string, 10) : 20,
+      offset: offset ? parseInt(offset as string, 10) : 0,
+    };
+
+    const [providers, total] = await Promise.all([
+      UserRepo.searchProviders(params),
+      UserRepo.countSearchProviders({ query: params.query }),
+    ]);
+
+    return res.json({
+      providers,
+      total,
+      limit: params.limit,
+      offset: params.offset,
+      hasMore: params.offset + providers.length < total,
+    });
+  } catch (error) {
+    console.error('searchProvidersAdvanced error:', error);
+    return res.status(500).json({ error: 'Server error' });
   }
 }
 

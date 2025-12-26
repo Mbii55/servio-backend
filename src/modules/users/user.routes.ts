@@ -1,25 +1,32 @@
 // src/modules/users/user.routes.ts
 import { Router } from "express";
 import { auth } from "../../middleware/auth.middleware";
-import * as UserController from "./user.controller";
+import {
+  getProviders,
+  getProvidersBasic,
+  getProviderProfile,
+  searchProvidersAdvanced,
+  adminGetUsers,
+  adminUpdateUserStatus,
+} from "./user.controller";
 
 const router = Router();
 
 /* PUBLIC/CUSTOMER ENDPOINTS */
+// Search providers - Must come BEFORE /providers/:id to avoid route conflicts
+router.get("/providers/search", searchProvidersAdvanced);
+
 // Main endpoint with services and business info
-router.get("/providers", UserController.getProviders);
+router.get("/providers", getProviders);
 
 // Legacy endpoint without services (if needed)
-router.get("/providers/basic", UserController.getProvidersBasic);
-
-// Search providers
-router.get("/providers/search", UserController.searchProviders);
+router.get("/providers/basic", getProvidersBasic);
 
 // Single provider profile
-router.get("/providers/:id", UserController.getProviderProfile);
+router.get("/providers/:id", getProviderProfile);
 
 /* ADMIN ONLY ENDPOINTS */
-router.get("/", auth("admin"), UserController.adminGetUsers);
-router.patch("/:id/status", auth("admin"), UserController.adminUpdateUserStatus);
+router.get("/", auth("admin"), adminGetUsers);
+router.patch("/:id/status", auth("admin"), adminUpdateUserStatus);
 
 export default router;

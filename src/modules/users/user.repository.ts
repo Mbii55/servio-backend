@@ -529,3 +529,101 @@ export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]
     };
   });
 }
+
+export async function searchProviders(params: {
+  query?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<any[]> {
+  const { query, limit = 20, offset = 0 } = params;
+
+  const conditions: string[] = [
+    "u.role = 'provider'",
+    "u.status = 'active'"
+  ];
+  const values: any[] = [];
+  let index = 1;
+
+  if (query && query.trim()) {
+    conditions.push(`(
+      bp.business_name ILIKE $${index} OR
+      bp.business_description ILIKE $${index} OR
+      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${index}
+    )`);
+    values.push(`%${query.trim()}%`);
+    index++;
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const sql = `
+    SELECT
+      u.id,
+      u.email,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.profile_image,
+      u.status,
+
+      bp.id AS business_id,
+      bp.business_name,
+      bp.business_description,
+      bp.business_logo,
+      bp.business_email,
+      bp.business_phone,
+      bp.city,
+      bp.country,
+
+      (
+        SELECT COUNT(*)::int
+        FROM services s
+        WHERE s.provider_id = u.id AND s.is_active = true
+      ) AS service_count
+
+    FROM users u
+    LEFT JOIN business_profiles bp ON bp.user_id = u.id
+    ${whereClause}
+    ORDER BY bp.business_name ASC, u.first_name ASC
+    LIMIT $${index} OFFSET $${index + 1}
+  `;
+
+  values.push(limit, offset);
+  const { rows } = await pool.query(sql, values);
+  return rows;
+}
+
+export async function countSearchProviders(params: {
+  query?: string;
+}): Promise<number> {
+  const { query } = params;
+
+  const conditions: string[] = [
+    "u.role = 'provider'",
+    "u.status = 'active'"
+  ];
+  const values: any[] = [];
+  let index = 1;
+
+  if (query && query.trim()) {
+    conditions.push(`(
+      bp.business_name ILIKE $${index} OR
+      bp.business_description ILIKE $${index} OR
+      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${index}
+    )`);
+    values.push(`%${query.trim()}%`);
+    index++;
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const sql = `
+    SELECT COUNT(*) as count
+    FROM users u
+    LEFT JOIN business_profiles bp ON bp.user_id = u.id
+    ${whereClause}
+  `;
+
+  const { rows } = await pool.query(sql, values);
+  return parseInt(rows[0]?.count || '0', 10);
+}

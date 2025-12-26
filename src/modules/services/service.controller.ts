@@ -7,6 +7,7 @@ import {
   createService,
   updateService,
   deactivateService,
+  countActiveServices,
 } from "./service.repository";
 import { CreateServiceInput, UpdateServiceInput } from "./service.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
@@ -15,19 +16,33 @@ import { uploadToCloudinary } from "../../utils/cloudinary-upload";
 // 🔹 Image limit for each service
 const MAX_SERVICE_IMAGES = 5;
 
+// src/modules/services/service.controller.ts
+
 export const listServicesHandler = async (req: Request, res: Response) => {
   try {
     const { categoryId, providerId, search, limit, offset } = req.query;
 
-    const services = await listActiveServices({
+    const params = {
       categoryId: categoryId as string | undefined,
       providerId: providerId as string | undefined,
       search: search as string | undefined,
-      limit: limit ? Number(limit) : 20,
-      offset: offset ? Number(offset) : 0,
-    });
+      limit: limit ? parseInt(limit as string, 10) : 20,
+      offset: offset ? parseInt(offset as string, 10) : 0,
+    };
 
-    return res.json(services);
+    // Get services and total count in parallel
+    const [services, total] = await Promise.all([
+      listActiveServices(params),
+      countActiveServices(params),
+    ]);
+
+    return res.json({
+      services,
+      total,
+      limit: params.limit,
+      offset: params.offset,
+      hasMore: params.offset + services.length < total,
+    });
   } catch (error) {
     console.error("listServicesHandler error:", error);
     return res.status(500).json({ error: "Server error" });

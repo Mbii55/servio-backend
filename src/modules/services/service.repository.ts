@@ -10,48 +10,128 @@ import {
   deleteCloudinaryImageByUrl,
 } from "../../utils/cloudinary-delete-by-url";
 
+
+// Enhanced search with provider business name
 export async function listActiveServices(params: {
   categoryId?: string;
-  providerId?: string; // ✅ NEW
+  providerId?: string;
   search?: string;
   limit?: number;
   offset?: number;
-}): Promise<Service[]> {
+}): Promise<ServiceWithProvider[]> {
   const { categoryId, providerId, search, limit = 20, offset = 0 } = params;
 
-  const conditions: string[] = ["is_active = true"];
+  const conditions: string[] = ["s.is_active = true"];
   const values: any[] = [];
   let index = 1;
 
   if (categoryId) {
-    conditions.push(`category_id = $${index++}`);
+    conditions.push(`s.category_id = $${index++}`);
     values.push(categoryId);
   }
 
   if (providerId) {
-    conditions.push(`provider_id = $${index++}`);
+    conditions.push(`s.provider_id = $${index++}`);
     values.push(providerId);
   }
 
-  if (search) {
-    conditions.push(`(title ILIKE $${index} OR description ILIKE $${index})`);
-    values.push(`%${search}%`);
+  // ✅ Enhanced search - includes business name
+  if (search && search.trim()) {
+    conditions.push(`(
+      s.title ILIKE $${index} OR 
+      s.description ILIKE $${index} OR
+      bp.business_name ILIKE $${index} OR
+      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${index}
+    )`);
+    values.push(`%${search.trim()}%`);
     index++;
   }
 
   const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const query = `
-    SELECT *
-    FROM services
+    SELECT 
+      s.*,
+      c.name as category_name,
+      c.slug as category_slug,
+      jsonb_build_object(
+        'id', u.id,
+        'first_name', u.first_name,
+        'last_name', u.last_name,
+        'phone', u.phone,
+        'profile_image', u.profile_image,
+        'business_profile', CASE
+          WHEN bp.user_id IS NULL THEN NULL
+          ELSE jsonb_build_object(
+            'business_name', bp.business_name,
+            'business_logo', bp.business_logo,
+            'business_description', bp.business_description,
+            'business_email', bp.business_email,
+            'business_phone', bp.business_phone,
+            'city', bp.city,
+            'country', bp.country
+          )
+        END
+      ) AS provider
+    FROM services s
+    LEFT JOIN categories c ON c.id = s.category_id
+    LEFT JOIN users u ON u.id = s.provider_id
+    LEFT JOIN business_profiles bp ON bp.user_id = s.provider_id
     ${whereClause}
-    ORDER BY created_at DESC
+    ORDER BY s.created_at DESC
     LIMIT $${index} OFFSET $${index + 1}
   `;
   values.push(limit, offset);
 
-  const result = await pool.query<Service>(query, values);
+  const result = await pool.query<ServiceWithProvider>(query, values);
   return result.rows;
+}
+
+// ✅ Add a count function for pagination
+export async function countActiveServices(params: {
+  categoryId?: string;
+  providerId?: string;
+  search?: string;
+}): Promise<number> {
+  const { categoryId, providerId, search } = params;
+
+  const conditions: string[] = ["s.is_active = true"];
+  const values: any[] = [];
+  let index = 1;
+
+  if (categoryId) {
+    conditions.push(`s.category_id = $${index++}`);
+    values.push(categoryId);
+  }
+
+  if (providerId) {
+    conditions.push(`s.provider_id = $${index++}`);
+    values.push(providerId);
+  }
+
+  if (search && search.trim()) {
+    conditions.push(`(
+      s.title ILIKE $${index} OR 
+      s.description ILIKE $${index} OR
+      bp.business_name ILIKE $${index} OR
+      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${index}
+    )`);
+    values.push(`%${search.trim()}%`);
+    index++;
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const query = `
+    SELECT COUNT(*) as count
+    FROM services s
+    LEFT JOIN users u ON u.id = s.provider_id
+    LEFT JOIN business_profiles bp ON bp.user_id = s.provider_id
+    ${whereClause}
+  `;
+
+  const result = await pool.query(query, values);
+  return parseInt(result.rows[0]?.count || '0', 10);
 }
 
 
@@ -246,3 +326,4 @@ export async function deactivateService(id: string): Promise<Service | null> {
   );
   return result.rows[0] || null;
 }
+
