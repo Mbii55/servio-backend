@@ -7,7 +7,6 @@ export async function listFavoritesForUser(
   userId: string,
   type?: FavoriteType
 ): Promise<FavoriteItem[]> {
-  // Build WHERE clause based on type filter
   let typeFilter = '';
   if (type === 'service') {
     typeFilter = "AND f.favorite_type = 'service'";
@@ -48,7 +47,7 @@ export async function listFavoritesForUser(
       bp_service.country AS business_country,
 
       -- Provider favorite fields (will be NULL for services)
-      u_provider.id AS provider_id,
+      u_provider.id AS provider_favorite_id,  -- ✅ Changed from provider_id to provider_favorite_id
       u_provider.email AS provider_email,
       u_provider.first_name AS provider_first_name_direct,
       u_provider.last_name AS provider_last_name_direct,
