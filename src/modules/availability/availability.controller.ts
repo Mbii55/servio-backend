@@ -270,8 +270,8 @@ export const getProviderSlotsForDateHandler = async (
       return res.status(400).json({ error: "serviceDuration must be a positive number" });
     }
 
-    // Check if date is within 30 days
-    const requestedDate = new Date(date);
+    // ✅ FIX: Parse date in local timezone, not UTC
+    const requestedDate = new Date(`${date}T00:00:00`); // Add time to avoid UTC issues
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -295,12 +295,9 @@ export const getProviderSlotsForDateHandler = async (
       });
     }
 
-    const jsDate = new Date(date);
-    if (isNaN(jsDate.getTime())) {
-      return res.status(400).json({ error: "Invalid date format" });
-    }
-
-    const dayOfWeek = mapJsDayToEnum(jsDate.getUTCDay());
+    // ✅ FIX: Use getDay() instead of getUTCDay()
+    const dayOfWeek = mapJsDayToEnum(requestedDate.getDay());
+    
     const availability = await listAvailabilityForProviderOnDay(
       providerId,
       dayOfWeek
