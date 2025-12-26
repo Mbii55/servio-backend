@@ -12,19 +12,20 @@ import {
 
 const router = Router();
 
-// All favorites endpoints require authentication (customer/provider/admin)
+// List all favorites (with optional type filter)
+// GET /api/v1/favorites?type=service or ?type=provider or no param for all
 router.get("/", auth(null), listMyFavoritesHandler);
 
-// Status: GET /api/v1/favorites/status/:serviceId
+// Service favorites
 router.get("/status/:serviceId", auth(null), getFavoriteStatusHandler);
-
-// Add: POST /api/v1/favorites/:serviceId
 router.post("/:serviceId", auth(null), addFavoriteHandler);
-
-// Toggle: POST /api/v1/favorites/:serviceId/toggle
 router.post("/:serviceId/toggle", auth(null), toggleFavoriteHandler);
-
-// Remove: DELETE /api/v1/favorites/:serviceId
 router.delete("/:serviceId", auth(null), removeFavoriteHandler);
+
+// Provider favorites
+router.get("/provider/status/:providerId", auth(null), getFavoriteStatusHandler);
+router.post("/provider/:providerId", auth(null), addFavoriteHandler);
+router.post("/provider/:providerId/toggle", auth(null), toggleFavoriteHandler);
+router.delete("/provider/:providerId", auth(null), removeFavoriteHandler);
 
 export default router;
