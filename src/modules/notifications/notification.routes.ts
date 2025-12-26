@@ -1,3 +1,4 @@
+// src/modules/notifications/notification.routes.ts
 import { Router } from "express";
 import { auth } from "../../middleware/auth.middleware";
 import {
@@ -9,10 +10,10 @@ import {
 
 const router = Router();
 
-// Provider portal notifications
-router.get("/", auth("provider"), getMyNotificationsHandler);
-router.get("/unread-count", auth("provider"), getMyUnreadCountHandler);
-router.post("/mark-all-read", auth("provider"), markAllReadHandler);
-router.patch("/:id/read", auth("provider"), markOneReadHandler);
+// ✅ Changed from auth("provider") to auth(null) - allows all authenticated users
+router.get("/", auth(null), getMyNotificationsHandler);
+router.get("/unread-count", auth(null), getMyUnreadCountHandler);
+router.patch("/read-all", auth(null), markAllReadHandler); // ✅ Changed POST to PATCH
+router.patch("/:id/read", auth(null), markOneReadHandler);
 
 export default router;

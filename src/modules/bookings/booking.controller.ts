@@ -11,6 +11,73 @@ import { AuthPayload } from "../../middleware/auth.middleware";
 import { Server } from "socket.io";
 import { listProviderBookingsDetailed } from "./booking.repository";
 import { createNotification } from "../notifications/notification.repository";
+import { sendPushNotificationToUser } from "../../utils/expo-push.service";
+
+// ✅ Helper function to notify customer about booking status changes
+async function notifyCustomerBookingUpdate(
+  customerId: string,
+  bookingId: string,
+  bookingNumber: string,
+  newStatus: string
+) {
+  const messages: Record<string, { title: string; body: string; type: string }> = {
+    accepted: {
+      title: '✅ Booking Accepted',
+      body: `Your booking #${bookingNumber} has been accepted.`,
+      type: 'booking_accepted',
+    },
+    rejected: {
+      title: '❌ Booking Rejected',
+      body: `Your booking #${bookingNumber} was rejected.`,
+      type: 'booking_rejected',
+    },
+    in_progress: {
+      title: '🔧 Service Started',
+      body: `Your booking #${bookingNumber} is now in progress.`,
+      type: 'booking_in_progress',
+    },
+    completed: {
+      title: '✨ Service Completed',
+      body: `Your booking #${bookingNumber} has been completed.`,
+      type: 'booking_completed',
+    },
+    cancelled: {
+      title: '🚫 Booking Cancelled',
+      body: `Booking #${bookingNumber} has been cancelled.`,
+      type: 'booking_cancelled',
+    },
+  };
+
+  const message = messages[newStatus];
+  if (!message) return;
+
+  try {
+    // Create in-app notification
+    await createNotification({
+      user_id: customerId,
+      type: message.type,
+      title: message.title,
+      message: message.body,
+      data: { booking_id: bookingId, booking_number: bookingNumber },
+    });
+
+    // Send push notification
+    await sendPushNotificationToUser({
+      userId: customerId,
+      title: message.title,
+      body: message.body,
+      data: {
+        booking_id: bookingId,
+        booking_number: bookingNumber,
+        type: message.type,
+      },
+    });
+
+    console.log(`✅ Customer notification sent for booking ${bookingNumber}`);
+  } catch (error) {
+    console.error('Error sending customer notification:', error);
+  }
+}
 
 export const createBookingHandler = async (req: Request, res: Response) => {
   try {
@@ -52,8 +119,7 @@ export const createBookingHandler = async (req: Request, res: Response) => {
       customer_notes,
     });
 
-    // ✅ Create notification for provider (partner)
-    // booking must include provider_id + id. If not, tell me and I’ll adjust.
+    // ✅ Create notification for provider
     if ((booking as any)?.provider_id) {
       const bookingId = (booking as any).id;
       const providerId = (booking as any).provider_id;
@@ -72,12 +138,23 @@ export const createBookingHandler = async (req: Request, res: Response) => {
           customer_id: user.userId,
         },
       });
+
+      // ✅ Send push notification to provider
+      await sendPushNotificationToUser({
+        userId: providerId,
+        title: "New booking request",
+        body: `New booking request (${bookingNumber})`,
+        data: {
+          booking_id: bookingId,
+          service_id: service_id,
+          customer_id: user.userId,
+          type: "booking_created",
+        },
+      });
     }
 
-    // ✅ Socket emit (keep)
+    // ✅ Socket emit
     const io = req.app.get("io") as Server | undefined;
-
-    // Better: emit to that provider only (room), fallback to global if you haven't implemented rooms yet
     const providerId = (booking as any)?.provider_id;
     if (providerId) {
       io?.to(`provider:${providerId}`).emit("booking:created", booking);
@@ -95,7 +172,6 @@ export const createBookingHandler = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Server error", detail: error.message });
   }
 };
-
 
 export const listMyBookingsHandler = async (req: Request, res: Response) => {
   try {
@@ -122,7 +198,6 @@ export const getBookingHandler = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // TODO: extra check that user is involved in booking OR admin
     return res.json(booking);
   } catch (error) {
     console.error("getBookingHandler error:", error);
@@ -151,6 +226,12 @@ export const updateBookingStatusHandler = async (req: Request, res: Response) =>
       return res.status(403).json({ message: "Customers can only cancel bookings" });
     }
 
+    // ✅ Get booking BEFORE update (to get customer_id and booking_number)
+    const booking = await getBookingById(id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
     const updated = await updateBookingStatus(id, status, {
       cancellation_reason,
       provider_notes,
@@ -158,6 +239,16 @@ export const updateBookingStatusHandler = async (req: Request, res: Response) =>
 
     if (!updated) {
       return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // ✅ Notify customer about status change (only when provider/admin updates)
+    if (user.role !== "customer") {
+      await notifyCustomerBookingUpdate(
+        booking.customer_id,
+        booking.id,
+        booking.booking_number,
+        status
+      );
     }
 
     const io = req.app.get("io") as Server | undefined;
@@ -178,14 +269,11 @@ export const listProviderBookingsDetailedHandler = async (req: Request, res: Res
     const user = (req as any).user as AuthPayload | undefined;
     if (!user) return res.status(401).json({ message: "Unauthorized" });
 
-    // provider-only (or allow admin if you want)
     if (user.role !== "provider" && user.role !== "admin") {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    // Provider sees only their bookings
     const providerId = user.userId;
-
     const data = await listProviderBookingsDetailed(providerId);
     return res.json(data);
   } catch (error) {
