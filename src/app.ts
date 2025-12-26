@@ -1,9 +1,11 @@
+// src/app.ts
 import express, { Application, Request, Response } from "express";
 import cors from "cors";
 
 import authRoutes from "./modules/auth/auth.routes";
 import categoryRoutes from "./modules/categories/category.routes";
 import serviceRoutes from "./modules/services/service.routes";
+import searchRoutes from "./modules/search/search.routes"; // ✅ Add this
 import addressRoutes from "./modules/addresses/address.routes";
 import bookingRoutes from "./modules/bookings/booking.routes";
 import availabilityRoutes from "./modules/availability/availability.routes";
@@ -37,6 +39,7 @@ app.get("/api/v1", (req: Request, res: Response) => {
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/categories", categoryRoutes);
 app.use("/api/v1/services", serviceRoutes);
+app.use("/api/v1/search", searchRoutes); // ✅ Add this line
 app.use("/api/v1/addresses", addressRoutes);
 app.use("/api/v1/bookings", bookingRoutes);
 app.use("/api/v1/availability", availabilityRoutes);

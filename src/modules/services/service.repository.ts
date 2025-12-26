@@ -11,14 +11,14 @@ import {
 } from "../../utils/cloudinary-delete-by-url";
 
 
-// Enhanced search with provider business name
+// Update the existing listActiveServices function
 export async function listActiveServices(params: {
   categoryId?: string;
   providerId?: string;
   search?: string;
   limit?: number;
   offset?: number;
-}): Promise<ServiceWithProvider[]> {
+}): Promise<Service[]> {
   const { categoryId, providerId, search, limit = 20, offset = 0 } = params;
 
   const conditions: string[] = ["s.is_active = true"];
@@ -35,7 +35,7 @@ export async function listActiveServices(params: {
     values.push(providerId);
   }
 
-  // ✅ Enhanced search - includes business name
+  // Enhanced search - includes business name and provider name
   if (search && search.trim()) {
     conditions.push(`(
       s.title ILIKE $${index} OR 
@@ -83,7 +83,7 @@ export async function listActiveServices(params: {
   `;
   values.push(limit, offset);
 
-  const result = await pool.query<ServiceWithProvider>(query, values);
+  const result = await pool.query<Service>(query, values);
   return result.rows;
 }
 
@@ -133,7 +133,6 @@ export async function countActiveServices(params: {
   const result = await pool.query(query, values);
   return parseInt(result.rows[0]?.count || '0', 10);
 }
-
 
 export async function getServiceById(id: string): Promise<ServiceWithProvider | null> {
   const result = await pool.query<ServiceWithProvider>(

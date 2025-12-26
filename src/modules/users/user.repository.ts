@@ -530,6 +530,10 @@ export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]
   });
 }
 
+// src/modules/users/user.repository.ts
+
+// Add these functions at the end of the file
+
 export async function searchProviders(params: {
   query?: string;
   limit?: number;
