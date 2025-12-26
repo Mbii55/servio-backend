@@ -202,6 +202,7 @@ export async function getActiveProvidersWithServices(): Promise<ProviderPublicPr
       bp.id as business_id,
       bp.business_name,
       bp.business_description,
+      bp.business_logo,               -- ✅ ADD THIS LINE
       bp.business_email,
       bp.business_phone,
       bp.street_address,
@@ -295,6 +296,7 @@ export async function getProviderProfileWithServices(providerId: string): Promis
       bp.id as business_id,
       bp.business_name,
       bp.business_description,
+      bp.business_logo,               -- ✅ ADD THIS LINE
       bp.business_email,
       bp.business_phone,
       bp.street_address,
@@ -391,6 +393,7 @@ export async function searchProvidersByName(searchTerm: string): Promise<Provide
       bp.id as business_id,
       bp.business_name,
       bp.business_description,
+      bp.business_logo,               -- ✅ ADD THIS LINE
       bp.business_email,
       bp.business_phone,
       bp.street_address,
@@ -471,6 +474,7 @@ export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]
       bp.id as business_id,
       bp.business_name,
       bp.business_description,
+      bp.business_logo,               -- ✅ ADD THIS LINE
       bp.business_email,
       bp.business_phone,
       bp.street_address,
