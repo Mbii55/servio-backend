@@ -47,6 +47,7 @@ export interface ProviderBusinessProfile {
   id: string;
   business_name: string;
   business_description: string | null;
+  business_logo: string | null;
   business_email: string | null;
   business_phone: string | null;
   street_address: string | null;
