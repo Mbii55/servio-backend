@@ -80,9 +80,26 @@ export async function getEarningsTransactions(providerId: string): Promise<Earni
       s.title as service_title,
       b.scheduled_date,
       b.completed_at,
-      b.subtotal,
-      b.commission_amount,
-      b.provider_earnings,
+
+      -- ✅ only show money when completed + paid
+      CASE
+        WHEN b.status = 'completed' AND b.payment_status = 'paid'
+          THEN b.subtotal
+        ELSE 0
+      END as subtotal,
+
+      CASE
+        WHEN b.status = 'completed' AND b.payment_status = 'paid'
+          THEN b.commission_amount
+        ELSE 0
+      END as commission_amount,
+
+      CASE
+        WHEN b.status = 'completed' AND b.payment_status = 'paid'
+          THEN b.provider_earnings
+        ELSE 0
+      END as provider_earnings,
+
       b.payment_method,
       b.payment_status,
       b.status
@@ -96,6 +113,7 @@ export async function getEarningsTransactions(providerId: string): Promise<Earni
 
   return result.rows;
 }
+
 
 export async function getMonthlyEarnings(providerId: string): Promise<MonthlyEarnings[]> {
   const result = await pool.query<MonthlyEarnings>(
