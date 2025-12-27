@@ -114,24 +114,62 @@ export async function updateUserProfile(
 }
 
 /* 🔹 ADMIN: LIST USERS (EXCLUDES ADMINS) */
-export async function adminListUsers(
-  role?: UserRole
-): Promise<AdminUserListItem[]> {
-  const params: any[] = [];
-  let q = `
-    SELECT id, email, role, status, first_name, last_name, created_at
-    FROM users
-    WHERE role != 'admin'
-  `;
+export async function adminListUsers(params?: {
+  role?: UserRole;
+  status?: UserStatus;
+  search?: string;
+}) {
+  const conditions: string[] = [];
+  const values: any[] = [];
+  let i = 1;
 
-  if (role) {
-    params.push(role);
-    q += ` AND role = $${params.length}`;
+  if (params?.role) {
+    conditions.push(`u.role = $${i++}`);
+    values.push(params.role);
   }
 
-  q += ` ORDER BY created_at DESC`;
+  if (params?.status) {
+    conditions.push(`u.status = $${i++}`);
+    values.push(params.status);
+  }
 
-  const res = await pool.query<AdminUserListItem>(q, params);
+  if (params?.search && params.search.trim()) {
+    const q = `%${params.search.trim()}%`;
+    conditions.push(`(
+      u.first_name ILIKE $${i} OR
+      u.last_name ILIKE $${i} OR
+      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${i} OR
+      u.email ILIKE $${i} OR
+      COALESCE(u.phone, '') ILIKE $${i} OR
+      COALESCE(bp.business_name, '') ILIKE $${i}
+    )`);
+    values.push(q);
+    i++;
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const sql = `
+    SELECT
+      u.id,
+      u.email,
+      u.role,
+      u.status,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.profile_image,
+      u.created_at,
+      u.updated_at,
+
+      bp.business_logo
+    FROM users u
+    LEFT JOIN business_profiles bp ON bp.user_id = u.id
+    ${whereClause}
+    ORDER BY u.created_at DESC
+  `;
+
+  const res = await pool.query(sql, values);
   return res.rows;
 }
 

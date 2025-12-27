@@ -6,15 +6,16 @@ import { UserRole, UserStatus } from "./user.types";
 /* ADMIN — GET ALL USERS (CUSTOMERS & PROVIDERS ONLY) */
 export async function adminGetUsers(req: Request, res: Response) {
   try {
-    const role = req.query.role as UserRole | undefined;
+    const role = (req.query.role as UserRole) || undefined;
+    const status = (req.query.status as UserStatus) || undefined;
+    const search = (req.query.search as string) || undefined;
 
-    // If someone tries role=admin, just return empty (admins are excluded anyway)
-    const users = await UserRepo.adminListUsers(role === "admin" ? undefined : role);
+    const users = await UserRepo.adminListUsers({ role, status, search });
 
-    return res.json({ users });
-  } catch (err) {
+    res.json({ users });
+  } catch (err: any) {
     console.error("adminGetUsers error:", err);
-    return res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Failed to fetch users" });
   }
 }
 
@@ -56,15 +57,15 @@ export async function getProviders(req: Request, res: Response) {
 export async function getProviderProfile(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    
+
     const provider = await UserRepo.getProviderProfileWithServices(id);
-    
+
     if (!provider) {
-      return res.status(404).json({ 
-        error: "Provider not found or not available" 
+      return res.status(404).json({
+        error: "Provider not found or not available"
       });
     }
-    
+
     return res.json({ provider });
   } catch (err) {
     console.error("getProviderProfile error:", err);
@@ -76,13 +77,13 @@ export async function getProviderProfile(req: Request, res: Response) {
 export async function searchProviders(req: Request, res: Response) {
   try {
     const { query } = req.query;
-    
+
     if (!query || typeof query !== 'string') {
       // If no search query, return all active providers
       const providers = await UserRepo.getActiveProvidersWithServices();
       return res.json({ providers });
     }
-    
+
     const providers = await UserRepo.searchProvidersByName(query);
     return res.json({ providers });
   } catch (err) {
