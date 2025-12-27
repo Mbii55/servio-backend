@@ -307,22 +307,10 @@ export const getProviderSlotsForDateHandler = async (
     // ✅ FIX: Use getDay() instead of getUTCDay()
     const dayOfWeek = mapJsDayToEnum(requestedDate.getDay());
 
-    // ✅ ADD DEBUG LOGS:
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-console.log('🔍 DEBUG - Get Provider Slots');
-console.log('Date string:', date);
-console.log('Requested Date object:', requestedDate);
-console.log('getDay():', requestedDate.getDay());
-console.log('Day of week enum:', dayOfWeek);
-    
     const availability = await listAvailabilityForProviderOnDay(
       providerId,
       dayOfWeek
     );
-
-console.log('Availability records found:', availability.length);
-console.log('Availability data:', availability);
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     if (availability.length === 0) {
       return res.json({ 
