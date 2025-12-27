@@ -345,6 +345,7 @@ export async function updateBookingStatus(
 
     if (newStatus === "completed") {
       setParts.push(`completed_at = CURRENT_TIMESTAMP`);
+      setParts.push(`payment_status = 'paid'`);
     }
 
     if (newStatus === "cancelled") {
