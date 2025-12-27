@@ -58,7 +58,6 @@ function generateSlotsWithBuffer(
 ): string[] {
   const startMinutes = timeToMinutes(start);
   const endMinutes = timeToMinutes(end);
-  const totalSlotTime = serviceDurationMinutes + BUFFER_TIME_MINUTES;
 
   const slots: string[] = [];
   let currentMinutes = startMinutes;
@@ -80,12 +79,22 @@ function generateSlotsWithBuffer(
       slots.push(slotTime);
     }
 
-    // Move to next slot (service duration + buffer)
-    currentMinutes += totalSlotTime;
+    // ✅ FIX: Check if we can fit another appointment AFTER buffer
+    const nextSlotWithBuffer = currentMinutes + serviceDurationMinutes + BUFFER_TIME_MINUTES;
+    
+    if (nextSlotWithBuffer + serviceDurationMinutes <= endMinutes) {
+      // There's room for another appointment after buffer, so use buffer spacing
+      currentMinutes += serviceDurationMinutes + BUFFER_TIME_MINUTES;
+    } else {
+      // No room for another appointment after buffer
+      // Try without buffer to see if we can squeeze one more in
+      currentMinutes += serviceDurationMinutes;
+    }
   }
 
   return slots;
 }
+
 
 // ---------------- Provider management ----------------
 
@@ -310,7 +319,7 @@ console.log('Day of week enum:', dayOfWeek);
       providerId,
       dayOfWeek
     );
-    
+
 console.log('Availability records found:', availability.length);
 console.log('Availability data:', availability);
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
