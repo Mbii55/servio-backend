@@ -28,11 +28,11 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
        FROM bookings b
       ) AS total_bookings,
 
-      -- Platform revenue = sum of commission on completed+paid
-      (SELECT COALESCE(SUM(b.commission_amount), 0)
-       FROM bookings b
-       WHERE b.status = 'completed' AND b.payment_status = 'paid'
-      ) AS revenue
+        -- Platform revenue = sum of commission on completed+paid
+        (SELECT COALESCE(SUM(b.commission_amount), 0)
+        FROM bookings b
+        WHERE b.status = 'completed' AND b.payment_status = 'paid'
+        ) AS revenue
   `;
 
   const res = await pool.query(q);
