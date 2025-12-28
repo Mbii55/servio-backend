@@ -38,14 +38,20 @@ export interface MonthlyEarnings {
 export interface AdminEarningsSummary {
   total_commission: number;
   total_provider_payout: number;
+  total_revenue: number;
+  total_bookings: number;
+  average_commission_rate: number;
 }
 
 export interface AdminEarningsByProviderRow {
   provider_id: string;
   provider_name: string;
+  provider_email: string;
   total_amount: number;
   total_commission: number;
   total_net: number;
+  booking_count: number;
+  commission_rate: number;
 }
 
 export async function getEarningsSummary(providerId: string): Promise<EarningsSummary> {
@@ -114,7 +120,6 @@ export async function getEarningsTransactions(providerId: string): Promise<Earni
   return result.rows;
 }
 
-
 export async function getMonthlyEarnings(providerId: string): Promise<MonthlyEarnings[]> {
   const result = await pool.query<MonthlyEarnings>(
     `
@@ -138,6 +143,9 @@ export async function getMonthlyEarnings(providerId: string): Promise<MonthlyEar
   return result.rows;
 }
 
+/**
+ * ✅ UPDATED: Get admin earnings summary with enhanced metrics
+ */
 export async function adminEarningsSummary(
   from?: string,
   to?: string
@@ -147,28 +155,41 @@ export async function adminEarningsSummary(
 
   if (from) {
     params.push(from);
-    where += ` AND e.created_at >= $${params.length}`;
+    where += ` AND b.completed_at::date >= $${params.length}`;
   }
   if (to) {
     params.push(to);
-    where += ` AND e.created_at <= $${params.length}`;
+    where += ` AND b.completed_at::date <= $${params.length}`;
   }
 
   const q = `
     SELECT
-      COALESCE(SUM(e.commission), 0) AS total_commission,
-      COALESCE(SUM(e.net_amount), 0) AS total_provider_payout
-    FROM earnings e
-    WHERE 1=1 ${where}
+      COALESCE(SUM(b.commission_amount), 0) AS total_commission,
+      COALESCE(SUM(b.provider_earnings), 0) AS total_provider_payout,
+      COALESCE(SUM(b.subtotal), 0) AS total_revenue,
+      COUNT(*)::INTEGER AS total_bookings,
+      CASE 
+        WHEN SUM(b.subtotal) > 0 
+        THEN (SUM(b.commission_amount) / SUM(b.subtotal) * 100)
+        ELSE 0 
+      END AS average_commission_rate
+    FROM bookings b
+    WHERE b.status = 'completed' ${where}
   `;
 
   const res = await pool.query(q, params);
   return {
     total_commission: Number(res.rows[0].total_commission),
     total_provider_payout: Number(res.rows[0].total_provider_payout),
+    total_revenue: Number(res.rows[0].total_revenue),
+    total_bookings: res.rows[0].total_bookings,
+    average_commission_rate: Number(res.rows[0].average_commission_rate),
   };
 }
 
+/**
+ * ✅ UPDATED: Get admin earnings breakdown by provider with commission rates
+ */
 export async function adminEarningsByProvider(
   from?: string,
   to?: string
@@ -178,34 +199,41 @@ export async function adminEarningsByProvider(
 
   if (from) {
     params.push(from);
-    where += ` AND e.created_at >= $${params.length}`;
+    where += ` AND b.completed_at::date >= $${params.length}`;
   }
   if (to) {
     params.push(to);
-    where += ` AND e.created_at <= $${params.length}`;
+    where += ` AND b.completed_at::date <= $${params.length}`;
   }
 
   const q = `
     SELECT
       u.id AS provider_id,
       (u.first_name || ' ' || u.last_name) AS provider_name,
-      SUM(e.amount) AS total_amount,
-      SUM(e.commission) AS total_commission,
-      SUM(e.net_amount) AS total_net
-    FROM earnings e
-    JOIN users u ON u.id = e.provider_id
-    WHERE 1=1 ${where}
-    GROUP BY u.id, provider_name
+      u.email AS provider_email,
+      COALESCE(SUM(b.subtotal), 0) AS total_amount,
+      COALESCE(SUM(b.commission_amount), 0) AS total_commission,
+      COALESCE(SUM(b.provider_earnings), 0) AS total_net,
+      COUNT(*)::INTEGER AS booking_count,
+      COALESCE(bp.commission_rate, 15.0) AS commission_rate
+    FROM bookings b
+    JOIN users u ON u.id = b.provider_id
+    LEFT JOIN business_profiles bp ON bp.user_id = u.id
+    WHERE b.status = 'completed' ${where}
+    GROUP BY u.id, u.first_name, u.last_name, u.email, bp.commission_rate
     ORDER BY total_commission DESC
   `;
 
   const res = await pool.query(q, params);
-  return res.rows.map((r:any) => ({
+  return res.rows.map((r: any) => ({
     provider_id: r.provider_id,
     provider_name: r.provider_name,
+    provider_email: r.provider_email,
     total_amount: Number(r.total_amount),
     total_commission: Number(r.total_commission),
     total_net: Number(r.total_net),
+    booking_count: r.booking_count,
+    commission_rate: Number(r.commission_rate),
   }));
 }
 
