@@ -60,7 +60,7 @@ export async function createBusinessProfile(
       input.businessDescription || null,
       input.businessLogo || null,
       "Qatar",
-      15.0,
+      15.0, // Default commission rate
       true,
     ]
   );
@@ -130,9 +130,13 @@ export async function updateBusinessProfile(
 }
 
 /* ======================================================
-   COMMISSION
+   COMMISSION MANAGEMENT
 ====================================================== */
 
+/**
+ * Get commission rate for a provider by their user_id
+ * Used during booking creation to calculate commission
+ */
 export async function getCommissionRateForProvider(
   providerId: string
 ): Promise<number> {
@@ -142,20 +146,59 @@ export async function getCommissionRateForProvider(
   );
 
   if (result.rows.length === 0) {
-    return 15.0;
+    return 15.0; // Default fallback rate
   }
 
   return parseFloat(result.rows[0].commission_rate);
 }
 
+/**
+ * Get commission rate by business_profile_id
+ * Used by admin to view current rate
+ */
+export async function getCommissionRateByBusinessProfileId(
+  businessProfileId: string
+): Promise<number | null> {
+  const result = await pool.query(
+    `SELECT commission_rate FROM business_profiles WHERE id = $1`,
+    [businessProfileId]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return parseFloat(result.rows[0].commission_rate);
+}
+
+/**
+ * ✅ NEW: Admin update commission rate for a specific provider
+ * @param businessProfileId - The business profile ID
+ * @param commissionRate - New commission rate (0-100)
+ */
+export async function adminUpdateCommissionRate(
+  businessProfileId: string,
+  commissionRate: number
+): Promise<void> {
+  await pool.query(
+    `
+    UPDATE business_profiles
+    SET commission_rate = $1, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $2
+    `,
+    [commissionRate, businessProfileId]
+  );
+}
+
 /* ======================================================
-   ADMIN — PROVIDER REVIEW
+   ADMIN – PROVIDER REVIEW
 ====================================================== */
 
 export interface AdminProviderProfileRow {
   id: string;
   business_name: string;
   is_active: boolean;
+  commission_rate: string; // ✅ Added commission_rate
   city: string | null;
   country: string;
   created_at: string;
@@ -175,6 +218,7 @@ export async function adminListProviderProfiles(): Promise<
       bp.id,
       bp.business_name,
       bp.is_active,
+      bp.commission_rate,
       bp.city,
       bp.country,
       bp.created_at,
