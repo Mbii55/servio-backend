@@ -250,3 +250,62 @@ export async function adminSetBusinessActive(
     [isActive, businessProfileId]
   );
 }
+
+/**
+ * Get full provider profile with all business details
+ * Used by admin to view complete provider information
+ */
+export async function adminGetFullProviderProfile(
+  businessProfileId: string
+): Promise<any | null> {
+  const result = await pool.query(
+    `
+    SELECT
+      bp.id,
+      bp.user_id,
+      bp.business_name,
+      bp.business_description,
+      bp.business_logo,
+      bp.business_email,
+      bp.business_phone,
+      bp.street_address,
+      bp.city,
+      bp.state,
+      bp.postal_code,
+      bp.country,
+      bp.latitude,
+      bp.longitude,
+      bp.tax_id,
+      bp.commission_rate,
+      bp.is_active,
+      bp.created_at,
+      bp.updated_at,
+      
+      u.email,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.profile_image,
+      u.status,
+      
+      -- Count of services
+      (SELECT COUNT(*)::INTEGER FROM services WHERE provider_id = bp.user_id AND is_active = true) as active_services_count,
+      
+      -- Count of total bookings
+      (SELECT COUNT(*)::INTEGER FROM bookings WHERE provider_id = bp.user_id) as total_bookings,
+      
+      -- Count of completed bookings
+      (SELECT COUNT(*)::INTEGER FROM bookings WHERE provider_id = bp.user_id AND status = 'completed') as completed_bookings,
+      
+      -- Total earnings
+      (SELECT COALESCE(SUM(provider_earnings), 0) FROM bookings WHERE provider_id = bp.user_id AND status = 'completed') as total_earnings
+      
+    FROM business_profiles bp
+    JOIN users u ON u.id = bp.user_id
+    WHERE bp.id = $1
+    `,
+    [businessProfileId]
+  );
+
+  return result.rows[0] || null;
+}

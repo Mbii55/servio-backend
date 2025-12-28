@@ -58,3 +58,25 @@ export async function adminGetProviderCommissionRate(req: Request, res: Response
     return res.status(500).json({ error: "Server error", detail: error.message });
   }
 }
+
+/**
+ * Get single provider profile with full details
+ * This is an optional enhancement to provide more detailed profile information
+ * in the modal without making multiple API calls
+ */
+export async function adminGetProviderProfile(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    
+    const profile = await Repo.adminGetFullProviderProfile(id);
+    
+    if (!profile) {
+      return res.status(404).json({ error: "Provider profile not found" });
+    }
+    
+    return res.json(profile);
+  } catch (error: any) {
+    console.error("adminGetProviderProfile error:", error);
+    return res.status(500).json({ error: "Server error", detail: error.message });
+  }
+}
