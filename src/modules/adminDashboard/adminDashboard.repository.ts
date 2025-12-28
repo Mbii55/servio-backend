@@ -28,10 +28,9 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
        FROM bookings b
       ) AS total_bookings,
 
-        -- Platform revenue = sum of commission on completed+paid
-        (SELECT COALESCE(SUM(b.commission_amount), 0)
-        FROM bookings b
-        WHERE b.status = 'completed' AND b.payment_status = 'paid'
+        -- Platform revenue (match Earnings page) = sum of earnings.commission
+        (SELECT COALESCE(SUM(e.commission), 0)
+        FROM earnings e
         ) AS revenue
   `;
 
