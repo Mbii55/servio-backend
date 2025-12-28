@@ -22,8 +22,31 @@ import adminDashboardRoutes from "./modules/adminDashboard/adminDashboard.routes
 
 const app: Application = express();
 
-// Middleware
-app.use(cors());
+// ✅ CORS (Admin + Partner dashboards)
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+
+  // TODO: replace with your real Vercel domains
+  process.env.ADMIN_ORIGIN,
+  process.env.PARTNER_ORIGIN,
+].filter(Boolean) as string[];
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // allow Postman/curl (no origin)
+      if (!origin) return cb(null, true);
+
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
