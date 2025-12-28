@@ -197,6 +197,7 @@ export async function adminUpdateCommissionRate(
 export interface AdminProviderProfileRow {
   id: string;
   business_name: string;
+  business_logo: string | null;
   is_active: boolean;
   commission_rate: string; // ✅ Added commission_rate
   city: string | null;
@@ -217,6 +218,7 @@ export async function adminListProviderProfiles(): Promise<
     SELECT
       bp.id,
       bp.business_name,
+      bp.business_logo,
       bp.is_active,
       bp.commission_rate,
       bp.city,

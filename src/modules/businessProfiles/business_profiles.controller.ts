@@ -59,11 +59,7 @@ export async function adminGetProviderCommissionRate(req: Request, res: Response
   }
 }
 
-/**
- * Get single provider profile with full details
- * This is an optional enhancement to provide more detailed profile information
- * in the modal without making multiple API calls
- */
+// ✅ NEW: Get single provider profile with full details
 export async function adminGetProviderProfile(req: Request, res: Response) {
   try {
     const { id } = req.params;
