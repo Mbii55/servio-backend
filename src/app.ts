@@ -22,24 +22,32 @@ import adminDashboardRoutes from "./modules/adminDashboard/adminDashboard.routes
 
 const app: Application = express();
 
-// ✅ CORS (Admin + Partner dashboards)
+/* ---------------------------------------------------
+   CORS CONFIG (Admin + Partner dashboards)
+--------------------------------------------------- */
+
+// normalize origin (remove trailing slash if exists)
+const normalize = (v?: string) => (v ? v.replace(/\/$/, "") : v);
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
-
-  // TODO: replace with your real Vercel domains
-  process.env.ADMIN_ORIGIN,
-  process.env.PARTNER_ORIGIN,
+  normalize(process.env.ADMIN_ORIGIN),
+  normalize(process.env.PARTNER_ORIGIN),
 ].filter(Boolean) as string[];
 
 app.use(
   cors({
     origin: (origin, cb) => {
-      // allow Postman/curl (no origin)
+      // allow Postman / server-to-server requests
       if (!origin) return cb(null, true);
 
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+      if (allowedOrigins.includes(origin)) {
+        return cb(null, true);
+      }
+
+      // ❗ DO NOT throw — deny silently (prevents 500)
+      return cb(null, false);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -47,15 +55,18 @@ app.use(
   })
 );
 
+// Body parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
+/* ---------------------------------------------------
+   Health & Root
+--------------------------------------------------- */
+
 app.get("/health", (req: Request, res: Response) => {
   res.json({ status: "OK", message: "Servio API is running" });
 });
 
-// API root
 app.get("/api/v1", (req: Request, res: Response) => {
   res.json({
     message: "Servio API v1",
@@ -63,12 +74,12 @@ app.get("/api/v1", (req: Request, res: Response) => {
   });
 });
 
-// -------------------- Routes --------------------
+/* ---------------------------------------------------
+   Routes
+--------------------------------------------------- */
 
-// Auth
 app.use("/api/v1/auth", authRoutes);
 
-// Core domain
 app.use("/api/v1/categories", categoryRoutes);
 app.use("/api/v1/services", serviceRoutes);
 app.use("/api/v1/search", searchRoutes);
