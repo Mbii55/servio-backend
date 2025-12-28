@@ -5,6 +5,7 @@ import {
   listBookingsForUser,
   getBookingById,
   updateBookingStatus,
+  listAllBookingsForAdmin,
 } from "./booking.repository";
 import { BookingStatus } from "./booking.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
@@ -278,6 +279,66 @@ export const listProviderBookingsDetailedHandler = async (req: Request, res: Res
     return res.json(data);
   } catch (error) {
     console.error("listProviderBookingsDetailedHandler error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ✅ NEW: Admin-only endpoint with filtering
+export const listAdminBookingsHandler = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as AuthPayload | undefined;
+    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    
+    if (user.role !== "admin") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    // Get query parameters
+    const { 
+      from, 
+      to, 
+      status, 
+      q: searchQuery 
+    } = req.query as {
+      from?: string;
+      to?: string;
+      status?: string;
+      q?: string;
+    };
+
+    // Call the new admin repository function
+    const bookings = await listAllBookingsForAdmin({
+      from,
+      to,
+      status,
+      searchQuery
+    });
+    
+    // Format for frontend
+    const formatted = bookings.map(booking => ({
+      ...booking,
+      customer_name: booking.customer_first_name && booking.customer_last_name 
+        ? `${booking.customer_first_name} ${booking.customer_last_name}`
+        : booking.customer_first_name || booking.customer_last_name || null,
+      customer_email: booking.customer_email || null,
+      customer_phone: booking.customer_phone || null,
+      provider_name: booking.provider_business_name || 
+        (booking.provider_first_name && booking.provider_last_name 
+          ? `${booking.provider_first_name} ${booking.provider_last_name}`
+          : booking.provider_first_name || booking.provider_last_name || null),
+      provider_email: booking.provider_business_email || booking.provider_email || null,
+      provider_phone: booking.provider_business_phone || booking.provider_phone || null,
+      category_name: booking.category_name || null,
+      service_price: Number(booking.service_price) || 0,
+      // Ensure all required fields exist
+      payment_status: booking.payment_status || 'pending',
+      payment_method: booking.payment_method || 'cash',
+      transaction_id: booking.transaction_id || null
+    }));
+    
+    return res.json(formatted);
+  } catch (error) {
+    console.error("listAdminBookingsHandler error:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };

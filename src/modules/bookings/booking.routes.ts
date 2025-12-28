@@ -6,6 +6,7 @@ import {
   getBookingHandler,
   updateBookingStatusHandler,
   listProviderBookingsDetailedHandler,
+  listAdminBookingsHandler,
 } from "./booking.controller";
 import { auth } from "../../middleware/auth.middleware";
 
@@ -16,6 +17,9 @@ router.post("/", auth("customer"), createBookingHandler);
 
 // ✅ provider detailed must come BEFORE "/:id"
 router.get("/provider/detailed", auth(), listProviderBookingsDetailedHandler);
+
+// NEW: Admin bookings with filtering (MUST come before "/:id")
+router.get("/admin/all", auth("admin"), listAdminBookingsHandler);
 
 // list bookings for current user (customer/provider/admin)
 router.get("/me", auth(), listMyBookingsHandler);

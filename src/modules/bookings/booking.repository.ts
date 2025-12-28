@@ -524,3 +524,105 @@ export async function listProviderBookingsDetailed(
 
   return result.rows;
 }
+
+// Add this NEW function for admin only - with filtering support
+export async function listAllBookingsForAdmin(params?: {
+  from?: string;
+  to?: string;
+  status?: string;
+  searchQuery?: string;
+}): Promise<any[]> {
+  const { from, to, status, searchQuery } = params || {};
+  
+  let query = `
+    SELECT
+      b.*,
+      
+      -- service info
+      s.title AS service_title,
+      s.description AS service_description,
+      s.images AS service_images,
+      
+      -- customer info
+      c.first_name AS customer_first_name,
+      c.last_name AS customer_last_name,
+      c.email AS customer_email,
+      c.phone AS customer_phone,
+      c.profile_image AS customer_profile_image,
+      
+      -- provider info
+      pu.first_name AS provider_first_name,
+      pu.last_name AS provider_last_name,
+      pu.email AS provider_email,
+      pu.phone AS provider_phone,
+      
+      -- provider business info
+      bp.business_name AS provider_business_name,
+      bp.business_logo AS provider_business_logo,
+      bp.business_phone AS provider_business_phone,
+      bp.business_email AS provider_business_email,
+      
+      -- category info
+      cat.name AS category_name,
+      
+      -- payment info from bookings table
+      b.payment_status,
+      b.payment_method
+      -- If you have a separate payments table, add LEFT JOIN here
+
+    FROM bookings b
+    
+    LEFT JOIN services s ON s.id = b.service_id
+    LEFT JOIN users c ON c.id = b.customer_id
+    LEFT JOIN users pu ON pu.id = b.provider_id
+    LEFT JOIN business_profiles bp ON bp.user_id = b.provider_id
+    LEFT JOIN categories cat ON cat.id = s.category_id
+    
+    WHERE 1=1
+  `;
+  
+  const values: any[] = [];
+  let paramIndex = 1;
+  
+  // Date range filter
+  if (from) {
+    query += ` AND b.scheduled_date >= $${paramIndex}`;
+    values.push(from);
+    paramIndex++;
+  }
+  
+  if (to) {
+    query += ` AND b.scheduled_date <= $${paramIndex}`;
+    values.push(to);
+    paramIndex++;
+  }
+  
+  // Status filter
+  if (status && status !== 'all') {
+    query += ` AND b.status = $${paramIndex}`;
+    values.push(status);
+    paramIndex++;
+  }
+  
+  // Search filter
+  if (searchQuery) {
+    query += ` AND (
+      b.booking_number ILIKE $${paramIndex} OR
+      c.first_name ILIKE $${paramIndex} OR
+      c.last_name ILIKE $${paramIndex} OR
+      c.email ILIKE $${paramIndex} OR
+      pu.first_name ILIKE $${paramIndex} OR
+      pu.last_name ILIKE $${paramIndex} OR
+      bp.business_name ILIKE $${paramIndex} OR
+      s.title ILIKE $${paramIndex}
+    )`;
+    values.push(`%${searchQuery}%`);
+    paramIndex++;
+  }
+  
+  query += ` ORDER BY b.created_at DESC`;
+  
+  const res = await pool.query(query, values);
+  
+  return res.rows;
+}
