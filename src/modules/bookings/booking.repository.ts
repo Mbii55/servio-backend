@@ -586,17 +586,17 @@ export async function listAllBookingsForAdmin(params?: {
   
 
 // Date range filter
-if (from) {
-  query += ` AND b.created_at::date >= $${paramIndex}`;
-  values.push(from);
-  paramIndex++;
-}
+// if (from) {
+//   query += ` AND b.created_at::date >= $${paramIndex}`;
+//   values.push(from);
+//   paramIndex++;
+// }
 
-if (to) {
-  query += ` AND b.created_at::date <= $${paramIndex}`;
-  values.push(to);
-  paramIndex++;
-}
+// if (to) {
+//   query += ` AND b.created_at::date <= $${paramIndex}`;
+//   values.push(to);
+//   paramIndex++;
+// }
 
   // Status filter
   if (status && status !== 'all') {
