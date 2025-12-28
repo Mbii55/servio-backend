@@ -584,7 +584,8 @@ export async function listAllBookingsForAdmin(params?: {
   const values: any[] = [];
   let paramIndex = 1;
   
-  // Date range filter
+
+// Date range filter
 if (from) {
   query += ` AND b.created_at::date >= $${paramIndex}`;
   values.push(from);
