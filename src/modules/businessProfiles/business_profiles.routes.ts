@@ -8,6 +8,9 @@ const router = Router();
 // ✅ Admin: List all providers
 router.get("/admin", auth("admin"), C.adminListProviders);
 
+// ✅ NEW: Admin: Get single provider profile (MUST come before /:id/active and /:id/commission)
+router.get("/admin/:id", auth("admin"), C.adminGetProviderProfile);
+
 // ✅ Admin: Toggle active status
 router.patch("/admin/:id/active", auth("admin"), C.adminToggleActive);
 
