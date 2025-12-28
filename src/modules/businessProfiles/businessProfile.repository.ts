@@ -199,7 +199,7 @@ export interface AdminProviderProfileRow {
   business_name: string;
   business_logo: string | null;
   is_active: boolean;
-  commission_rate: string; // ✅ Added commission_rate
+  commission_rate: string;
   city: string | null;
   country: string;
   created_at: string;
