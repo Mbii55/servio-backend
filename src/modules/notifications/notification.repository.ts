@@ -1,3 +1,4 @@
+// src/modules/notifications/notification.repository.ts
 import pool from "../../config/database";
 
 export async function createNotification(params: {

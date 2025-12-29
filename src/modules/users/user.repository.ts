@@ -676,3 +676,20 @@ export async function countSearchProviders(params: {
   const { rows } = await pool.query(sql, values);
   return parseInt(rows[0]?.count || '0', 10);
 }
+
+/**
+ * Update user's FCM/Expo push token
+ */
+export async function updateUserPushToken(
+  userId: string,
+  fcmToken: string | null
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE users 
+     SET fcm_token = $1, updated_at = CURRENT_TIMESTAMP 
+     WHERE id = $2`,
+    [fcmToken, userId]
+  );
+  
+  return (result.rowCount ?? 0) > 0;  // ✅ Handle null case
+}

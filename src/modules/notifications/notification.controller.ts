@@ -1,3 +1,4 @@
+// src/modules/notifications/notification.controller.ts
 import { Request, Response } from "express";
 import {
   getUnreadCount,
