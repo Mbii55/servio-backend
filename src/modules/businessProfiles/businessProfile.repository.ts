@@ -225,6 +225,7 @@ export async function adminListProviderProfiles(): Promise<
       bp.country,
       bp.created_at,
       u.id AS user_id,
+      u.display_id,
       u.email,
       u.first_name,
       u.last_name
@@ -284,6 +285,7 @@ export async function adminGetFullProviderProfile(
       bp.updated_at,
       
       u.email,
+      u.display_id,
       u.first_name,
       u.last_name,
       u.phone,

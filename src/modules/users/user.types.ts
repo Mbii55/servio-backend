@@ -4,6 +4,7 @@ export type UserStatus = "active" | "inactive" | "suspended";
 
 export interface User {
   id: string;
+  display_id: string; // ✨ NEW - Simple readable ID (e.g., CUS-2024-000001)
   email: string;
   password_hash: string;
   role: UserRole;
@@ -21,11 +22,14 @@ export interface User {
 /* 🔹 ADMIN LIST VIEW (safe fields only) */
 export interface AdminUserListItem {
   id: string;
+  display_id: string; // ✨ NEW - For admin display
   email: string;
   role: UserRole;
   status: UserStatus;
   first_name: string;
   last_name: string;
+  phone: string | null; // ✨ ADDED
+  business_logo: string | null; // ✨ ADDED (for providers)
   created_at: string;
 }
 

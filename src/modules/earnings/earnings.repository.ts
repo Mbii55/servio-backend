@@ -210,6 +210,7 @@ export async function adminEarningsByProvider(
     SELECT
       u.id AS provider_id,
       (u.first_name || ' ' || u.last_name) AS provider_name,
+      u.display_id AS provider_display_id,
       u.email AS provider_email,
       COALESCE(SUM(b.subtotal), 0) AS total_amount,
       COALESCE(SUM(b.commission_amount), 0) AS total_commission,

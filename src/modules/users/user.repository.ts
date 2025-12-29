@@ -10,7 +10,7 @@ import {
   Service
 } from "./user.types";
 
-/* EXISTING FUNCTIONS — UNCHANGED */
+/* EXISTING FUNCTIONS — UPDATED WITH display_id */
 export async function findUserByEmail(email: string): Promise<User | null> {
   const result = await pool.query<User>(
     `SELECT * FROM users WHERE email = $1 LIMIT 1`,
@@ -113,12 +113,12 @@ export async function updateUserProfile(
   return res.rows[0] || null;
 }
 
-/* 🔹 ADMIN: LIST USERS (EXCLUDES ADMINS) */
+/* 🔹 ADMIN: LIST USERS (EXCLUDES ADMINS) - UPDATED WITH display_id */
 export async function adminListUsers(params?: {
   role?: UserRole;
   status?: UserStatus;
   search?: string;
-}) {
+}): Promise<AdminUserListItem[]> {
   const conditions: string[] = [];
   const values: any[] = [];
   let i = 1;
@@ -140,6 +140,7 @@ export async function adminListUsers(params?: {
       u.last_name ILIKE $${i} OR
       CONCAT(u.first_name, ' ', u.last_name) ILIKE $${i} OR
       u.email ILIKE $${i} OR
+      u.display_id ILIKE $${i} OR
       COALESCE(u.phone, '') ILIKE $${i} OR
       COALESCE(bp.business_name, '') ILIKE $${i}
     )`);
@@ -152,6 +153,7 @@ export async function adminListUsers(params?: {
   const sql = `
     SELECT
       u.id,
+      u.display_id,
       u.email,
       u.role,
       u.status,
@@ -169,78 +171,46 @@ export async function adminListUsers(params?: {
     ORDER BY u.created_at DESC
   `;
 
-  const res = await pool.query(sql, values);
-  return res.rows;
+  const result = await pool.query(sql, values);
+  return result.rows;
 }
 
-/* 🔹 ADMIN: UPDATE USER STATUS (RETURNS UPDATED USER OR NULL) */
+/* 🔹 ADMIN: UPDATE USER STATUS (CANNOT UPDATE ADMINS) */
 export async function adminUpdateUserStatus(
   userId: string,
   status: UserStatus
-): Promise<Pick<User, "id" | "email" | "role" | "status" | "first_name" | "last_name" | "created_at"> | null> {
-  const res = await pool.query(
+): Promise<User | null> {
+  const result = await pool.query<User>(
     `
     UPDATE users
     SET status = $1, updated_at = CURRENT_TIMESTAMP
     WHERE id = $2 AND role != 'admin'
-    RETURNING id, email, role, status, first_name, last_name, created_at
+    RETURNING *
     `,
     [status, userId]
   );
 
-  return res.rows[0] || null;
+  return result.rows[0] || null;
 }
 
-/* EXISTING push token */
-export async function updateUserPushToken(userId: string, expoPushToken: string) {
-  const res = await pool.query(
-    `
-    UPDATE users
-    SET fcm_token = $1, updated_at = NOW()
-    WHERE id = $2
-    RETURNING id, email, role, first_name, last_name, phone, status, profile_image, fcm_token, created_at
-    `,
-    [expoPushToken, userId]
-  );
-  return res.rows[0] || null;
-}
-
-/* 🔹 GET ALL ACTIVE PROVIDERS WITH SERVICES (MAIN FUNCTION) */
+/* 🔹 GET ALL ACTIVE PROVIDERS WITH SERVICES AND BUSINESS INFO */
 export async function getActiveProvidersWithServices(): Promise<ProviderPublicProfile[]> {
   const q = `
-    WITH provider_services AS (
-      SELECT 
-        s.provider_id,
-        JSON_AGG(
-          JSON_BUILD_OBJECT(
-            'id', s.id,
-            'title', s.title,
-            'description', s.description,
-            'base_price', s.base_price,
-            'duration_minutes', s.duration_minutes,
-            'images', s.images,
-            'is_active', s.is_active,
-            'created_at', s.created_at,
-            'updated_at', s.updated_at
-          ) ORDER BY s.created_at DESC
-        ) FILTER (WHERE s.is_active = true) as services
-      FROM services s
-      GROUP BY s.provider_id
-    )
-    SELECT 
-      u.id, 
-      u.email, 
-      u.first_name, 
-      u.last_name, 
-      u.phone, 
-      u.profile_image, 
-      u.role, 
-      u.status, 
+    SELECT
+      u.id,
+      u.email,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.profile_image,
+      u.role,
+      u.status,
       u.created_at,
-      bp.id as business_id,
+      
+      bp.id AS business_id,
       bp.business_name,
       bp.business_description,
-      bp.business_logo,               -- ✅ ADD THIS LINE
+      bp.business_logo,
       bp.business_email,
       bp.business_phone,
       bp.street_address,
@@ -250,20 +220,43 @@ export async function getActiveProvidersWithServices(): Promise<ProviderPublicPr
       bp.country,
       bp.latitude,
       bp.longitude,
-      COALESCE(ps.services, '[]'::json) as services
+      
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', s.id,
+            'title', s.title,
+            'description', s.description,
+            'base_price', s.base_price,
+            'duration_minutes', s.duration_minutes,
+            'images', s.images,
+            'is_active', s.is_active,
+            'created_at', s.created_at,
+            'updated_at', s.updated_at
+          )
+          ORDER BY s.created_at DESC
+        ) FILTER (WHERE s.id IS NOT NULL),
+        '[]'
+      ) AS services
     FROM users u
     LEFT JOIN business_profiles bp ON u.id = bp.user_id
-    LEFT JOIN provider_services ps ON u.id = ps.provider_id
-    WHERE u.role = 'provider' 
+    LEFT JOIN services s ON u.id = s.provider_id AND s.is_active = true
+    WHERE u.role = 'provider'
       AND u.status = 'active'
+    GROUP BY
+      u.id, u.email, u.first_name, u.last_name, u.phone, u.profile_image,
+      u.role, u.status, u.created_at,
+      bp.id, bp.business_name, bp.business_description, bp.business_logo,
+      bp.business_email, bp.business_phone, bp.street_address, bp.city,
+      bp.state, bp.postal_code, bp.country, bp.latitude, bp.longitude
     ORDER BY u.first_name, u.last_name
   `;
-  
+
   const res = await pool.query(q);
-  
+
   return res.rows.map(row => {
     let business: ProviderBusinessProfile | null = null;
-    
+
     if (row.business_id) {
       business = {
         id: row.business_id,
@@ -281,7 +274,7 @@ export async function getActiveProvidersWithServices(): Promise<ProviderPublicPr
         longitude: row.longitude
       };
     }
-    
+
     return {
       id: row.id,
       email: row.email,
@@ -299,42 +292,25 @@ export async function getActiveProvidersWithServices(): Promise<ProviderPublicPr
 }
 
 /* 🔹 GET SINGLE PROVIDER PROFILE WITH SERVICES */
-export async function getProviderProfileWithServices(providerId: string): Promise<ProviderPublicProfile | null> {
+export async function getProviderProfileWithServices(
+  providerId: string
+): Promise<ProviderPublicProfile | null> {
   const q = `
-    WITH provider_services AS (
-      SELECT 
-        s.provider_id,
-        JSON_AGG(
-          JSON_BUILD_OBJECT(
-            'id', s.id,
-            'title', s.title,
-            'description', s.description,
-            'base_price', s.base_price,
-            'duration_minutes', s.duration_minutes,
-            'images', s.images,
-            'is_active', s.is_active,
-            'created_at', s.created_at,
-            'updated_at', s.updated_at
-          ) ORDER BY s.created_at DESC
-        ) FILTER (WHERE s.is_active = true) as services
-      FROM services s
-      WHERE s.provider_id = $1
-      GROUP BY s.provider_id
-    )
-    SELECT 
-      u.id, 
-      u.email, 
-      u.first_name, 
-      u.last_name, 
-      u.phone, 
-      u.profile_image, 
-      u.role, 
-      u.status, 
+    SELECT
+      u.id,
+      u.email,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.profile_image,
+      u.role,
+      u.status,
       u.created_at,
-      bp.id as business_id,
+      
+      bp.id AS business_id,
       bp.business_name,
       bp.business_description,
-      bp.business_logo,               -- ✅ ADD THIS LINE
+      bp.business_logo,
       bp.business_email,
       bp.business_phone,
       bp.street_address,
@@ -344,25 +320,46 @@ export async function getProviderProfileWithServices(providerId: string): Promis
       bp.country,
       bp.latitude,
       bp.longitude,
-      COALESCE(ps.services, '[]'::json) as services
+      
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', s.id,
+            'title', s.title,
+            'description', s.description,
+            'base_price', s.base_price,
+            'duration_minutes', s.duration_minutes,
+            'images', s.images,
+            'is_active', s.is_active,
+            'created_at', s.created_at,
+            'updated_at', s.updated_at
+          )
+          ORDER BY s.created_at DESC
+        ) FILTER (WHERE s.id IS NOT NULL),
+        '[]'
+      ) AS services
     FROM users u
     LEFT JOIN business_profiles bp ON u.id = bp.user_id
-    LEFT JOIN provider_services ps ON u.id = ps.provider_id
-    WHERE u.id = $1 
-      AND u.role = 'provider' 
+    LEFT JOIN services s ON u.id = s.provider_id AND s.is_active = true
+    WHERE u.id = $1
+      AND u.role = 'provider'
       AND u.status = 'active'
-    LIMIT 1
+    GROUP BY
+      u.id, u.email, u.first_name, u.last_name, u.phone, u.profile_image,
+      u.role, u.status, u.created_at,
+      bp.id, bp.business_name, bp.business_description, bp.business_logo,
+      bp.business_email, bp.business_phone, bp.street_address, bp.city,
+      bp.state, bp.postal_code, bp.country, bp.latitude, bp.longitude
   `;
-  
+
   const res = await pool.query(q, [providerId]);
-  
-  if (res.rows.length === 0) {
-    return null;
-  }
-  
+
+  if (res.rows.length === 0) return null;
+
   const row = res.rows[0];
+
   let business: ProviderBusinessProfile | null = null;
-  
+
   if (row.business_id) {
     business = {
       id: row.business_id,
@@ -380,7 +377,7 @@ export async function getProviderProfileWithServices(providerId: string): Promis
       longitude: row.longitude
     };
   }
-  
+
   return {
     id: row.id,
     email: row.email,
@@ -396,42 +393,26 @@ export async function getProviderProfileWithServices(providerId: string): Promis
   };
 }
 
-/* 🔹 SEARCH PROVIDERS BY NAME WITH SERVICES */
-export async function searchProvidersByName(searchTerm: string): Promise<ProviderPublicProfile[]> {
+/* 🔹 SEARCH PROVIDERS BY NAME (SIMPLE) */
+export async function searchProvidersByName(query: string): Promise<ProviderPublicProfile[]> {
+  const searchPattern = `%${query.trim()}%`;
+  
   const q = `
-    WITH provider_services AS (
-      SELECT 
-        s.provider_id,
-        JSON_AGG(
-          JSON_BUILD_OBJECT(
-            'id', s.id,
-            'title', s.title,
-            'description', s.description,
-            'base_price', s.base_price,
-            'duration_minutes', s.duration_minutes,
-            'images', s.images,
-            'is_active', s.is_active,
-            'created_at', s.created_at,
-            'updated_at', s.updated_at
-          ) ORDER BY s.created_at DESC
-        ) FILTER (WHERE s.is_active = true) as services
-      FROM services s
-      GROUP BY s.provider_id
-    )
-    SELECT 
-      u.id, 
-      u.email, 
-      u.first_name, 
-      u.last_name, 
-      u.phone, 
-      u.profile_image, 
-      u.role, 
-      u.status, 
+    SELECT
+      u.id,
+      u.email,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.profile_image,
+      u.role,
+      u.status,
       u.created_at,
-      bp.id as business_id,
+      
+      bp.id AS business_id,
       bp.business_name,
       bp.business_description,
-      bp.business_logo,               -- ✅ ADD THIS LINE
+      bp.business_logo,
       bp.business_email,
       bp.business_phone,
       bp.street_address,
@@ -441,27 +422,56 @@ export async function searchProvidersByName(searchTerm: string): Promise<Provide
       bp.country,
       bp.latitude,
       bp.longitude,
-      COALESCE(ps.services, '[]'::json) as services
+      
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', s.id,
+            'title', s.title,
+            'description', s.description,
+            'base_price', s.base_price,
+            'duration_minutes', s.duration_minutes,
+            'images', s.images,
+            'is_active', s.is_active,
+            'created_at', s.created_at,
+            'updated_at', s.updated_at
+          )
+          ORDER BY s.created_at DESC
+        ) FILTER (WHERE s.id IS NOT NULL),
+        '[]'
+      ) AS services
     FROM users u
     LEFT JOIN business_profiles bp ON u.id = bp.user_id
-    LEFT JOIN provider_services ps ON u.id = ps.provider_id
-    WHERE u.role = 'provider' 
+    LEFT JOIN services s ON u.id = s.provider_id AND s.is_active = true
+    WHERE u.role = 'provider'
       AND u.status = 'active'
       AND (
-        u.first_name ILIKE $1 
-        OR u.last_name ILIKE $1 
-        OR CONCAT(u.first_name, ' ', u.last_name) ILIKE $1
-        OR bp.business_name ILIKE $1
-        OR bp.business_description ILIKE $1
+        u.first_name ILIKE $1 OR
+        u.last_name ILIKE $1 OR
+        CONCAT(u.first_name, ' ', u.last_name) ILIKE $1 OR
+        bp.business_name ILIKE $1
       )
-    ORDER BY u.first_name, u.last_name
+    GROUP BY
+      u.id, u.email, u.first_name, u.last_name, u.phone, u.profile_image,
+      u.role, u.status, u.created_at,
+      bp.id, bp.business_name, bp.business_description, bp.business_logo,
+      bp.business_email, bp.business_phone, bp.street_address, bp.city,
+      bp.state, bp.postal_code, bp.country, bp.latitude, bp.longitude
+    ORDER BY
+      CASE
+        WHEN bp.business_name ILIKE $1 THEN 1
+        WHEN u.first_name ILIKE $1 THEN 2
+        WHEN u.last_name ILIKE $1 THEN 3
+        ELSE 4
+      END,
+      u.first_name, u.last_name
   `;
-  
-  const res = await pool.query(q, [`%${searchTerm}%`]);
-  
+
+  const res = await pool.query(q, [searchPattern]);
+
   return res.rows.map(row => {
     let business: ProviderBusinessProfile | null = null;
-    
+
     if (row.business_id) {
       business = {
         id: row.business_id,
@@ -512,7 +522,7 @@ export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]
       bp.id as business_id,
       bp.business_name,
       bp.business_description,
-      bp.business_logo,               -- ✅ ADD THIS LINE
+      bp.business_logo,
       bp.business_email,
       bp.business_phone,
       bp.street_address,
@@ -563,15 +573,12 @@ export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]
       status: row.status,
       created_at: row.created_at,
       business,
-      services: [] // Empty array for basic version
+      services: []
     };
   });
 }
 
-// src/modules/users/user.repository.ts
-
-// Add these functions at the end of the file
-
+/* 🔹 SEARCH PROVIDERS WITH PAGINATION (ENHANCED) */
 export async function searchProviders(params: {
   query?: string;
   limit?: number;
