@@ -351,7 +351,7 @@ export async function adminUpdateVerificationStatus(
     await client.query("BEGIN");
 
     const currentResult = await client.query(
-      `SELECT verification_status FROM business_profiles WHERE id = $1::uuid`,
+      `SELECT verification_status FROM business_profiles WHERE id = $1`,
       [businessProfileId]
     );
 
