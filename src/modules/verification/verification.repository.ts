@@ -351,27 +351,50 @@ export async function adminUpdateVerificationStatus(
     await client.query("BEGIN");
 
     const currentResult = await client.query(
-      `SELECT verification_status FROM business_profiles WHERE id = $1`,
+      `SELECT verification_status FROM business_profiles WHERE id = $1::uuid`,
       [businessProfileId]
     );
 
     const previousStatus = currentResult.rows[0]?.verification_status || null;
 
-    await client.query(
+    // ✅ IMPORTANT: use verification_status_enum (your column type)
+    const updateRes = await client.query(
       `
       UPDATE business_profiles
       SET
-        verification_status = $1::verification_status,
-        verified_at = CASE WHEN $1 = 'approved' THEN CURRENT_TIMESTAMP ELSE NULL END,
-        verified_by = CASE WHEN $1 = 'approved' THEN $2::uuid ELSE NULL END,
-        rejection_reason = CASE WHEN $1 = 'rejected' THEN $3 ELSE NULL END,
-        rejected_at = CASE WHEN $1 = 'rejected' THEN CURRENT_TIMESTAMP ELSE NULL END,
+        verification_status = $1::verification_status_enum,
+        verified_at = CASE
+          WHEN $1::verification_status_enum = 'approved'::verification_status_enum
+          THEN CURRENT_TIMESTAMP
+          ELSE NULL
+        END,
+        verified_by = CASE
+          WHEN $1::verification_status_enum = 'approved'::verification_status_enum
+          THEN $2::uuid
+          ELSE NULL
+        END,
+        rejection_reason = CASE
+          WHEN $1::verification_status_enum = 'rejected'::verification_status_enum
+          THEN $3
+          ELSE NULL
+        END,
+        rejected_at = CASE
+          WHEN $1::verification_status_enum = 'rejected'::verification_status_enum
+          THEN CURRENT_TIMESTAMP
+          ELSE NULL
+        END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $4::uuid
+      RETURNING id, verification_status, verified_at, verified_by, rejected_at, rejection_reason
       `,
       [newStatus, adminId, rejectionReason || null, businessProfileId]
     );
 
+    if (updateRes.rowCount === 0) {
+      throw new Error("Business profile not found (no rows updated).");
+    }
+
+    // optional: mark documents verified/unverified to match business decision
     if (newStatus === "approved") {
       await client.query(
         `
@@ -404,6 +427,7 @@ export async function adminUpdateVerificationStatus(
       );
     }
 
+    // ✅ history: cast based on your history column type (likely verification_status_enum too)
     await client.query(
       `
       INSERT INTO verification_history (
@@ -413,7 +437,7 @@ export async function adminUpdateVerificationStatus(
         changed_by,
         reason
       )
-      VALUES ($1::uuid, $2::verification_status, $3::verification_status, $4::uuid, $5)
+      VALUES ($1::uuid, $2::verification_status_enum, $3::verification_status_enum, $4::uuid, $5)
       `,
       [businessProfileId, previousStatus, newStatus, adminId, rejectionReason || null]
     );
@@ -426,6 +450,7 @@ export async function adminUpdateVerificationStatus(
     client.release();
   }
 }
+
 
 /**
  * ADMIN: Get verification history for a business profile

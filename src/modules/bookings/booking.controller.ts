@@ -13,12 +13,10 @@ import { Server } from "socket.io";
 import { listProviderBookingsDetailed } from "./booking.repository";
 import { createNotification } from "../notifications/notification.repository";
 import { sendPushNotificationToUser } from "../../utils/expo-push.service";
-
 import { sendBookingConfirmationEmail } from "../../utils/email/sendBookingConfirmationEmail";
-import { sendBookingStatusUpdateEmail } from "../../utils/email/sendBookingStatusUpdateEmail";
 import pool from "../../config/database";
 
-// ✅ Helper function to notify customer about booking status changes
+// ✅ UPDATED: Removed email notification - only in-app + push
 async function notifyCustomerBookingUpdate(
   customerId: string,
   bookingId: string,
@@ -78,47 +76,11 @@ async function notifyCustomerBookingUpdate(
       },
     });
 
-    // ✅ NEW: Send email notification
-    // Get customer and booking details
-    const bookingDetails = await pool.query(
-      `
-      SELECT 
-        b.cancellation_reason,
-        c.email,
-        c.first_name,
-        c.last_name,
-        s.title as service_title,
-        bp.business_name as provider_name
-      FROM bookings b
-      JOIN users c ON c.id = b.customer_id
-      JOIN services s ON s.id = b.service_id
-      LEFT JOIN business_profiles bp ON bp.user_id = b.provider_id
-      WHERE b.id = $1
-      `,
-      [bookingId]
-    );
-
-    if (bookingDetails.rows.length > 0) {
-      const details = bookingDetails.rows[0];
-      
-      await sendBookingStatusUpdateEmail({
-        to: details.email,
-        customerName: `${details.first_name} ${details.last_name}`,
-        bookingNumber: bookingNumber,
-        serviceTitle: details.service_title,
-        providerName: details.provider_name || 'Service Provider',
-        status: newStatus as any,
-        cancellationReason: details.cancellation_reason,
-      });
-    }
-
-    console.log(`✅ Customer notifications and email sent for booking ${bookingNumber}`);
+    console.log(`✅ Customer notifications sent for booking ${bookingNumber}`);
   } catch (error) {
     console.error('Error sending customer notifications:', error);
   }
 }
-
-// ✅ UPDATED: createBookingHandler with email confirmation
 
 export const createBookingHandler = async (req: Request, res: Response) => {
   try {
@@ -193,7 +155,7 @@ export const createBookingHandler = async (req: Request, res: Response) => {
         },
       });
 
-      // ✅ NEW: Send booking confirmation email to customer
+      // ✅ Send booking confirmation email to customer
       try {
         const bookingDetails = await pool.query(
           `
@@ -330,6 +292,7 @@ export const updateBookingStatusHandler = async (req: Request, res: Response) =>
     }
 
     // ✅ Notify customer about status change (only when provider/admin updates)
+    // Only in-app + push notifications, NO email
     if (user.role !== "customer") {
       await notifyCustomerBookingUpdate(
         booking.customer_id,
@@ -370,7 +333,6 @@ export const listProviderBookingsDetailedHandler = async (req: Request, res: Res
   }
 };
 
-// ✅ NEW: Admin-only endpoint with filtering
 export const listAdminBookingsHandler = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as AuthPayload | undefined;
@@ -380,7 +342,6 @@ export const listAdminBookingsHandler = async (req: Request, res: Response) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    // Get query parameters
     const { 
       from, 
       to, 
@@ -393,7 +354,6 @@ export const listAdminBookingsHandler = async (req: Request, res: Response) => {
       q?: string;
     };
 
-    // Call the new admin repository function
     const bookings = await listAllBookingsForAdmin({
       from,
       to,
@@ -401,7 +361,6 @@ export const listAdminBookingsHandler = async (req: Request, res: Response) => {
       searchQuery
     });
     
-    // Format for frontend
     const formatted = bookings.map(booking => ({
       ...booking,
       customer_name: booking.customer_first_name && booking.customer_last_name 
@@ -417,7 +376,6 @@ export const listAdminBookingsHandler = async (req: Request, res: Response) => {
       provider_phone: booking.provider_business_phone || booking.provider_phone || null,
       category_name: booking.category_name || null,
       service_price: Number(booking.service_price) || 0,
-      // Ensure all required fields exist
       payment_status: booking.payment_status || 'pending',
       payment_method: booking.payment_method || 'cash',
       transaction_id: booking.transaction_id || null
