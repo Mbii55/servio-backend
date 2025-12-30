@@ -193,7 +193,7 @@ export async function adminUpdateUserStatus(
   return result.rows[0] || null;
 }
 
-/* 🔹 GET ALL ACTIVE PROVIDERS WITH SERVICES AND BUSINESS INFO */
+/* 🔹 GET ALL ACTIVE PROVIDERS WITH SERVICES - ✅ UPDATED */
 export async function getActiveProvidersWithServices(): Promise<ProviderPublicProfile[]> {
   const q = `
     SELECT
@@ -243,6 +243,7 @@ export async function getActiveProvidersWithServices(): Promise<ProviderPublicPr
     LEFT JOIN services s ON u.id = s.provider_id AND s.is_active = true
     WHERE u.role = 'provider'
       AND u.status = 'active'
+      AND bp.verification_status = 'approved' -- ✅ ADDED
     GROUP BY
       u.id, u.email, u.first_name, u.last_name, u.phone, u.profile_image,
       u.role, u.status, u.created_at,
@@ -291,7 +292,7 @@ export async function getActiveProvidersWithServices(): Promise<ProviderPublicPr
   });
 }
 
-/* 🔹 GET SINGLE PROVIDER PROFILE WITH SERVICES */
+/* 🔹 GET SINGLE PROVIDER PROFILE WITH SERVICES - ✅ UPDATED */
 export async function getProviderProfileWithServices(
   providerId: string
 ): Promise<ProviderPublicProfile | null> {
@@ -344,6 +345,7 @@ export async function getProviderProfileWithServices(
     WHERE u.id = $1
       AND u.role = 'provider'
       AND u.status = 'active'
+      AND bp.verification_status = 'approved' -- ✅ ADDED
     GROUP BY
       u.id, u.email, u.first_name, u.last_name, u.phone, u.profile_image,
       u.role, u.status, u.created_at,
@@ -393,7 +395,7 @@ export async function getProviderProfileWithServices(
   };
 }
 
-/* 🔹 SEARCH PROVIDERS BY NAME (SIMPLE) */
+/* 🔹 SEARCH PROVIDERS BY NAME (SIMPLE) - ✅ UPDATED */
 export async function searchProvidersByName(query: string): Promise<ProviderPublicProfile[]> {
   const searchPattern = `%${query.trim()}%`;
   
@@ -445,6 +447,7 @@ export async function searchProvidersByName(query: string): Promise<ProviderPubl
     LEFT JOIN services s ON u.id = s.provider_id AND s.is_active = true
     WHERE u.role = 'provider'
       AND u.status = 'active'
+      AND bp.verification_status = 'approved' -- ✅ ADDED
       AND (
         u.first_name ILIKE $1 OR
         u.last_name ILIKE $1 OR
@@ -506,7 +509,7 @@ export async function searchProvidersByName(query: string): Promise<ProviderPubl
   });
 }
 
-/* 🔹 BASIC PROVIDER LIST (LEGACY - WITHOUT SERVICES) */
+/* 🔹 BASIC PROVIDER LIST (LEGACY - WITHOUT SERVICES) - ✅ UPDATED */
 export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]> {
   const q = `
     SELECT 
@@ -536,6 +539,7 @@ export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]
     LEFT JOIN business_profiles bp ON u.id = bp.user_id
     WHERE u.role = 'provider' 
       AND u.status = 'active'
+      AND bp.verification_status = 'approved' -- ✅ ADDED
     ORDER BY u.first_name, u.last_name
   `;
   
@@ -578,7 +582,7 @@ export async function getActiveProvidersBasic(): Promise<ProviderPublicProfile[]
   });
 }
 
-/* 🔹 SEARCH PROVIDERS WITH PAGINATION (ENHANCED) */
+/* 🔹 SEARCH PROVIDERS WITH PAGINATION (ENHANCED) - ✅ UPDATED */
 export async function searchProviders(params: {
   query?: string;
   limit?: number;
@@ -588,7 +592,8 @@ export async function searchProviders(params: {
 
   const conditions: string[] = [
     "u.role = 'provider'",
-    "u.status = 'active'"
+    "u.status = 'active'",
+    "bp.verification_status = 'approved'" // ✅ ADDED
   ];
   const values: any[] = [];
   let index = 1;
@@ -642,6 +647,7 @@ export async function searchProviders(params: {
   return rows;
 }
 
+/* 🔹 COUNT SEARCH PROVIDERS - ✅ UPDATED */
 export async function countSearchProviders(params: {
   query?: string;
 }): Promise<number> {
@@ -649,7 +655,8 @@ export async function countSearchProviders(params: {
 
   const conditions: string[] = [
     "u.role = 'provider'",
-    "u.status = 'active'"
+    "u.status = 'active'",
+    "bp.verification_status = 'approved'" // ✅ ADDED
   ];
   const values: any[] = [];
   let index = 1;
@@ -691,5 +698,5 @@ export async function updateUserPushToken(
     [fcmToken, userId]
   );
   
-  return (result.rowCount ?? 0) > 0;  // ✅ Handle null case
+  return (result.rowCount ?? 0) > 0;
 }

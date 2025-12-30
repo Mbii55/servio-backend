@@ -22,14 +22,18 @@ export async function uploadVerificationDocument(
       document_type,
       document_url,
       document_name,
-      file_size
+      file_size,
+      cloudinary_public_id,
+      cloudinary_resource_type
     )
-    VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (business_profile_id, document_type) 
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (business_profile_id, document_type)
     DO UPDATE SET
       document_url = EXCLUDED.document_url,
       document_name = EXCLUDED.document_name,
       file_size = EXCLUDED.file_size,
+      cloudinary_public_id = EXCLUDED.cloudinary_public_id,
+      cloudinary_resource_type = EXCLUDED.cloudinary_resource_type,
       uploaded_at = CURRENT_TIMESTAMP,
       is_verified = false,
       verified_at = NULL,
@@ -44,6 +48,8 @@ export async function uploadVerificationDocument(
       input.document_url,
       input.document_name || null,
       input.file_size || null,
+      input.cloudinary_public_id ?? null, // ✅ $6
+      input.cloudinary_resource_type ?? null, // ✅ $7
     ]
   );
 
@@ -330,9 +336,9 @@ export async function adminVerifyDocument(
   return result.rows[0];
 }
 
-/**
- * ADMIN: Update business profile verification status
- */
+// src/modules/verification/verification.repository.ts
+// ✅ FIXED VERSION - Replace the adminUpdateVerificationStatus function with this
+
 export async function adminUpdateVerificationStatus(
   businessProfileId: string,
   adminId: string,
@@ -344,31 +350,60 @@ export async function adminUpdateVerificationStatus(
   try {
     await client.query("BEGIN");
 
-    // Get current status for history
     const currentResult = await client.query(
-      `SELECT verification_status FROM business_profiles WHERE id = $1`,
+      `SELECT verification_status FROM business_profiles WHERE id = $1::uuid`,
       [businessProfileId]
     );
 
     const previousStatus = currentResult.rows[0]?.verification_status || null;
 
-    // Update business profile status
     await client.query(
       `
       UPDATE business_profiles
       SET
-        verification_status = $1,
+        verification_status = $1::verification_status,
         verified_at = CASE WHEN $1 = 'approved' THEN CURRENT_TIMESTAMP ELSE NULL END,
-        verified_by = CASE WHEN $1 = 'approved' THEN $2 ELSE NULL END,
-        rejection_reason = $3,
+        verified_by = CASE WHEN $1 = 'approved' THEN $2::uuid ELSE NULL END,
+        rejection_reason = CASE WHEN $1 = 'rejected' THEN $3 ELSE NULL END,
         rejected_at = CASE WHEN $1 = 'rejected' THEN CURRENT_TIMESTAMP ELSE NULL END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $4
+      WHERE id = $4::uuid
       `,
       [newStatus, adminId, rejectionReason || null, businessProfileId]
     );
 
-    // Add to history
+    if (newStatus === "approved") {
+      await client.query(
+        `
+        UPDATE verification_documents
+        SET
+          is_verified = true,
+          verified_at = CURRENT_TIMESTAMP,
+          verified_by = $1::uuid,
+          rejection_reason = NULL,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE business_profile_id = $2::uuid
+        `,
+        [adminId, businessProfileId]
+      );
+    }
+
+    if (newStatus === "rejected") {
+      await client.query(
+        `
+        UPDATE verification_documents
+        SET
+          is_verified = false,
+          verified_at = NULL,
+          verified_by = NULL,
+          rejection_reason = $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE business_profile_id = $2::uuid
+        `,
+        [rejectionReason || "Rejected by admin", businessProfileId]
+      );
+    }
+
     await client.query(
       `
       INSERT INTO verification_history (
@@ -378,7 +413,7 @@ export async function adminUpdateVerificationStatus(
         changed_by,
         reason
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES ($1::uuid, $2::verification_status, $3::verification_status, $4::uuid, $5)
       `,
       [businessProfileId, previousStatus, newStatus, adminId, rejectionReason || null]
     );
@@ -466,4 +501,19 @@ export async function deleteVerificationDocument(
   );
 
   return result.rows.length > 0;
+}
+
+// PROVIDER: Get their own document by ID
+export async function getMyVerificationDocument(documentId: string, userId: string) {
+  const res = await pool.query(
+    `
+    SELECT vd.*
+    FROM verification_documents vd
+    JOIN business_profiles bp ON bp.id = vd.business_profile_id
+    WHERE vd.id = $1 AND bp.user_id = $2
+    LIMIT 1
+    `,
+    [documentId, userId]
+  );
+  return res.rows[0] || null;
 }

@@ -2,26 +2,27 @@
 import pool from "../../config/database";
 import {
   Service,
-  ServiceWithProvider,
   CreateServiceInput,
   UpdateServiceInput,
+  ServiceWithProvider,
 } from "./service.types";
-import {
-  deleteCloudinaryImageByUrl,
-} from "../../utils/cloudinary-delete-by-url";
+import { deleteCloudinaryImageByUrl } from "../../utils/cloudinary-delete-by-url";
 
-
-// Update the existing listActiveServices function
 export async function listActiveServices(params: {
   categoryId?: string;
   providerId?: string;
   search?: string;
   limit?: number;
   offset?: number;
-}): Promise<Service[]> {
+}): Promise<ServiceWithProvider[]> {
   const { categoryId, providerId, search, limit = 20, offset = 0 } = params;
 
-  const conditions: string[] = ["s.is_active = true"];
+  const conditions: string[] = [
+    "s.is_active = true",
+    "u.status = 'active'",
+    "u.role = 'provider'",
+    "bp.verification_status = 'approved'", // ✅ ADDED: Only show services from verified providers
+  ];
   const values: any[] = [];
   let index = 1;
 
@@ -35,59 +36,89 @@ export async function listActiveServices(params: {
     values.push(providerId);
   }
 
-  // Enhanced search - includes business name and provider name
   if (search && search.trim()) {
     conditions.push(`(
       s.title ILIKE $${index} OR 
       s.description ILIKE $${index} OR
-      bp.business_name ILIKE $${index} OR
-      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${index}
+      bp.business_name ILIKE $${index}
     )`);
     values.push(`%${search.trim()}%`);
     index++;
   }
 
-  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause = conditions.join(" AND ");
 
   const query = `
-    SELECT 
+    SELECT
       s.*,
-      c.name as category_name,
-      c.slug as category_slug,
-      jsonb_build_object(
-        'id', u.id,
-        'first_name', u.first_name,
-        'last_name', u.last_name,
-        'phone', u.phone,
-        'profile_image', u.profile_image,
-        'business_profile', CASE
-          WHEN bp.user_id IS NULL THEN NULL
-          ELSE jsonb_build_object(
-            'business_name', bp.business_name,
-            'business_logo', bp.business_logo,
-            'business_description', bp.business_description,
-            'business_email', bp.business_email,
-            'business_phone', bp.business_phone,
-            'city', bp.city,
-            'country', bp.country
-          )
-        END
-      ) AS provider
+      u.id as provider_id,
+      u.first_name as provider_first_name,
+      u.last_name as provider_last_name,
+      u.phone as provider_phone,
+      u.profile_image as provider_profile_image,
+      
+      bp.business_name,
+      bp.business_logo,
+      bp.business_description,
+      bp.business_email,
+      bp.business_phone,
+      bp.street_address,
+      bp.city,
+      bp.state,
+      bp.postal_code,
+      bp.country,
+      bp.latitude,
+      bp.longitude
     FROM services s
-    LEFT JOIN categories c ON c.id = s.category_id
-    LEFT JOIN users u ON u.id = s.provider_id
-    LEFT JOIN business_profiles bp ON bp.user_id = s.provider_id
-    ${whereClause}
+    JOIN users u ON u.id = s.provider_id
+    LEFT JOIN business_profiles bp ON bp.user_id = u.id
+    WHERE ${whereClause}
     ORDER BY s.created_at DESC
     LIMIT $${index} OFFSET $${index + 1}
   `;
+
   values.push(limit, offset);
 
-  const result = await pool.query<Service>(query, values);
-  return result.rows;
+  const result = await pool.query(query, values);
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    provider_id: row.provider_id,
+    category_id: row.category_id,
+    title: row.title,
+    description: row.description,
+    base_price: row.base_price,
+    duration_minutes: row.duration_minutes,
+    images: row.images,
+    is_active: row.is_active,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    provider: {
+      id: row.provider_id,
+      first_name: row.provider_first_name,
+      last_name: row.provider_last_name,
+      phone: row.provider_phone,
+      profile_image: row.provider_profile_image,
+      business_profile: row.business_name
+        ? {
+            business_name: row.business_name,
+            business_logo: row.business_logo,
+            business_description: row.business_description,
+            business_email: row.business_email,
+            business_phone: row.business_phone,
+            street_address: row.street_address,
+            city: row.city,
+            state: row.state,
+            postal_code: row.postal_code,
+            country: row.country,
+            latitude: row.latitude,
+            longitude: row.longitude,
+          }
+        : null,
+    },
+  }));
 }
 
-// ✅ Add a count function for pagination
 export async function countActiveServices(params: {
   categoryId?: string;
   providerId?: string;
@@ -95,7 +126,12 @@ export async function countActiveServices(params: {
 }): Promise<number> {
   const { categoryId, providerId, search } = params;
 
-  const conditions: string[] = ["s.is_active = true"];
+  const conditions: string[] = [
+    "s.is_active = true",
+    "u.status = 'active'",
+    "u.role = 'provider'",
+    "bp.verification_status = 'approved'", // ✅ ADDED
+  ];
   const values: any[] = [];
   let index = 1;
 
@@ -113,68 +149,104 @@ export async function countActiveServices(params: {
     conditions.push(`(
       s.title ILIKE $${index} OR 
       s.description ILIKE $${index} OR
-      bp.business_name ILIKE $${index} OR
-      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${index}
+      bp.business_name ILIKE $${index}
     )`);
     values.push(`%${search.trim()}%`);
     index++;
   }
 
-  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause = conditions.join(" AND ");
 
   const query = `
     SELECT COUNT(*) as count
     FROM services s
-    LEFT JOIN users u ON u.id = s.provider_id
-    LEFT JOIN business_profiles bp ON bp.user_id = s.provider_id
-    ${whereClause}
+    JOIN users u ON u.id = s.provider_id
+    LEFT JOIN business_profiles bp ON bp.user_id = u.id
+    WHERE ${whereClause}
   `;
 
   const result = await pool.query(query, values);
-  return parseInt(result.rows[0]?.count || '0', 10);
+  return parseInt(result.rows[0]?.count || "0", 10);
 }
 
 export async function getServiceById(id: string): Promise<ServiceWithProvider | null> {
-  const result = await pool.query<ServiceWithProvider>(
+  const result = await pool.query(
     `
     SELECT
       s.*,
-      jsonb_build_object(
-        'id', u.id,
-        'first_name', u.first_name,
-        'last_name', u.last_name,
-        'phone', u.phone,
-        'profile_image', u.profile_image,
-        'business_profile', CASE
-          WHEN bp.user_id IS NULL THEN NULL
-          ELSE jsonb_build_object(
-            'business_name', bp.business_name,
-            'business_logo', bp.business_logo,
-            'business_description', bp.business_description,
-            'business_email', bp.business_email,
-            'business_phone', bp.business_phone,
-            'street_address', bp.street_address,
-            'city', bp.city,
-            'state', bp.state,
-            'postal_code', bp.postal_code,
-            'country', bp.country,
-            'latitude', bp.latitude,
-            'longitude', bp.longitude
-          )
-        END
-      ) AS provider
+      u.id as provider_id,
+      u.first_name as provider_first_name,
+      u.last_name as provider_last_name,
+      u.phone as provider_phone,
+      u.profile_image as provider_profile_image,
+      
+      bp.business_name,
+      bp.business_logo,
+      bp.business_description,
+      bp.business_email,
+      bp.business_phone,
+      bp.street_address,
+      bp.city,
+      bp.state,
+      bp.postal_code,
+      bp.country,
+      bp.latitude,
+      bp.longitude
     FROM services s
     JOIN users u ON u.id = s.provider_id
     LEFT JOIN business_profiles bp ON bp.user_id = u.id
     WHERE s.id = $1
+      AND s.is_active = true
+      AND u.status = 'active'
+      AND bp.verification_status = 'approved' -- ✅ ADDED
     LIMIT 1
     `,
     [id]
   );
 
-  return result.rows[0] || null;
+  if (result.rows.length === 0) return null;
+
+  const row = result.rows[0];
+
+  return {
+    id: row.id,
+    provider_id: row.provider_id,
+    category_id: row.category_id,
+    title: row.title,
+    description: row.description,
+    base_price: row.base_price,
+    duration_minutes: row.duration_minutes,
+    images: row.images,
+    is_active: row.is_active,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    provider: {
+      id: row.provider_id,
+      first_name: row.provider_first_name,
+      last_name: row.provider_last_name,
+      phone: row.provider_phone,
+      profile_image: row.provider_profile_image,
+      business_profile: row.business_name
+        ? {
+            business_name: row.business_name,
+            business_logo: row.business_logo,
+            business_description: row.business_description,
+            business_email: row.business_email,
+            business_phone: row.business_phone,
+            street_address: row.street_address,
+            city: row.city,
+            state: row.state,
+            postal_code: row.postal_code,
+            country: row.country,
+            latitude: row.latitude,
+            longitude: row.longitude,
+          }
+        : null,
+    },
+  };
 }
 
+// ✅ PROVIDER-ONLY: Get their own services (no verification filter)
 export async function listServicesByProvider(providerId: string): Promise<Service[]> {
   const result = await pool.query<Service>(
     `SELECT * FROM services WHERE provider_id = $1 ORDER BY created_at DESC`,
@@ -183,6 +255,7 @@ export async function listServicesByProvider(providerId: string): Promise<Servic
   return result.rows;
 }
 
+// Rest of the functions remain unchanged (create, update, deactivate)
 export async function createService(
   providerId: string,
   input: CreateServiceInput
@@ -231,15 +304,16 @@ export async function updateService(
   id: string,
   input: UpdateServiceInput
 ): Promise<Service | null> {
-  // 1) Load existing service so we can detect removed images
-  const existing = await getServiceById(id);
-  if (!existing) return null;
-
-  // pg will give JSONB as plain JS; be defensive
-  const existingImages: string[] = Array.isArray(
-    (existing as any).images
-  )
-    ? ((existing as any).images as string[])
+  const existing = await pool.query<Service>(
+    `SELECT * FROM services WHERE id = $1`,
+    [id]
+  );
+  
+  if (existing.rows.length === 0) return null;
+  
+  const existingService = existing.rows[0];
+  const existingImages: string[] = Array.isArray((existingService as any).images)
+    ? ((existingService as any).images as string[])
     : [];
 
   const fields: string[] = [];
@@ -267,7 +341,6 @@ export async function updateService(
     values.push(input.duration_minutes);
   }
 
-  // 2) Handle images: track new images so we can delete removed ones
   let newImages: string[] = existingImages;
   if (input.images !== undefined) {
     newImages = input.images ?? [];
@@ -280,9 +353,8 @@ export async function updateService(
     values.push(input.is_active);
   }
 
-  // Nothing to update
   if (fields.length === 0) {
-    return existing;
+    return existingService;
   }
 
   const query = `
@@ -296,14 +368,12 @@ export async function updateService(
   const result = await pool.query<Service>(query, values);
   const updated = result.rows[0] || null;
 
-  // 3) Delete removed images from Cloudinary (fire-and-forget)
   if (updated && input.images !== undefined) {
     const removedImages = existingImages.filter(
       (url) => !newImages.includes(url)
     );
 
     for (const url of removedImages) {
-      // don't block response on deletes; just log failures
       deleteCloudinaryImageByUrl(url).catch((err) =>
         console.error("Cloudinary delete error:", err)
       );
@@ -315,14 +385,8 @@ export async function updateService(
 
 export async function deactivateService(id: string): Promise<Service | null> {
   const result = await pool.query<Service>(
-    `
-    UPDATE services
-    SET is_active = false
-    WHERE id = $1
-    RETURNING *
-    `,
+    `UPDATE services SET is_active = false WHERE id = $1 RETURNING *`,
     [id]
   );
   return result.rows[0] || null;
 }
-

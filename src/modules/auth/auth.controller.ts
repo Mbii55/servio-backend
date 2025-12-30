@@ -1,7 +1,10 @@
 // src/modules/auth/auth.controller.ts
 import { Request, Response } from "express";
+import pool from "../../config/database";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import { sendPasswordResetEmail } from "./auth.mailer";
 import {
   createUser,
   findUserByEmail,
@@ -16,6 +19,14 @@ import {
   getBusinessProfileByUserId 
 } from '../businessProfiles/businessProfile.repository';
 import { updateUserPushToken } from "../users/user.repository";
+import {
+  createPasswordResetToken,
+  deleteExpiredTokensForUser,
+  findValidPasswordResetToken,
+  markPasswordResetTokenUsed,
+} from "./passwordReset.repository";
+
+import { sendProviderRegistrationNotification } from "../../utils/email/sendProviderRegistrationNotification";
 
 const DEFAULT_ROLE: UserRole = "customer";
 
@@ -30,7 +41,7 @@ export const register = async (req: Request, res: Response) => {
       role,
       business_name,
       business_description,
-      business_logo, // Added
+      business_logo,
     } = req.body;
 
     // Validation
@@ -73,8 +84,27 @@ export const register = async (req: Request, res: Response) => {
         userId: user.id,
         businessName: business_name,
         businessDescription: business_description,
-        businessLogo: business_logo, // Added
+        businessLogo: business_logo,
       });
+
+      // ✅ NEW: Send admin notification email
+      try {
+        await sendProviderRegistrationNotification({
+          providerName: `${first_name} ${last_name}`,
+          providerEmail: email,
+          providerPhone: phone,
+          businessName: business_name,
+          businessDescription: business_description,
+          userId: user.id,
+          businessProfileId: businessProfile.id,
+        });
+        
+        console.log(`✅ Admin notification sent for new provider: ${business_name}`);
+      } catch (emailError) {
+        // Log the error but don't fail registration
+        console.error('Failed to send admin notification email:', emailError);
+        // Registration continues successfully even if email fails
+      }
     }
 
     // Generate token
@@ -97,6 +127,8 @@ export const register = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Registration failed' });
   }
 };
+
+
 
 const SUSPENDED_MESSAGE =
   "Your account is suspended due to suspicious activity, contact our support team at support@servio.com.";
@@ -269,6 +301,104 @@ export const savePushToken = async (req: Request, res: Response) => {
     return res.json({ ok: true });
   } catch (error: any) {
     console.error("savePushToken error:", error);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+
+    // Always respond 200 to avoid leaking which emails exist
+    if (!email) {
+      return res.status(200).json({ message: "If the email exists, a reset link was sent." });
+    }
+
+    const user = await findUserByEmail(email);
+
+    // same response even if not found
+    if (!user) {
+      return res.status(200).json({ message: "If the email exists, a reset link was sent." });
+    }
+
+    // optional: block suspended users from reset
+    if (user.status === "suspended") {
+      return res.status(200).json({ message: "If the email exists, a reset link was sent." });
+    }
+
+    // optional cleanup
+    await deleteExpiredTokensForUser(user.id);
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 mins
+
+    await createPasswordResetToken({
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    });
+
+    const baseUrl = process.env.PARTNER_WEB_URL || "http://localhost:3000";
+    const resetUrl = `${baseUrl}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
+
+    await sendPasswordResetEmail({
+      to: email,
+      name: user.first_name,
+      resetUrl,
+    });
+
+    return res.status(200).json({ message: "If the email exists, a reset link was sent." });
+  } catch (error) {
+    console.error("forgotPassword error:", error);
+    // Still return generic success to prevent enumeration
+    return res.status(200).json({ message: "If the email exists, a reset link was sent." });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const token = String(req.body.token || "").trim();
+    const password = String(req.body.password || "");
+
+    if (!email || !token || password.length < 6) {
+      return res.status(400).json({ error: "Invalid request" });
+    }
+
+    const user = await findUserByEmail(email);
+    if (!user) return res.status(400).json({ error: "Invalid or expired token" });
+
+    if (user.status === "suspended") {
+      return res.status(403).json({ message: SUSPENDED_MESSAGE });
+    }
+
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const resetRow = await findValidPasswordResetToken({
+      userId: user.id,
+      tokenHash,
+    });
+
+    if (!resetRow) {
+      return res.status(400).json({ error: "Invalid or expired token" });
+    }
+
+    const newHash = await bcrypt.hash(password, 10);
+
+    // Transaction: update password + mark token used
+    await pool.query("BEGIN");
+    try {
+      await pool.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [newHash, user.id]);
+      await markPasswordResetTokenUsed(resetRow.id);
+      await pool.query("COMMIT");
+    } catch (e) {
+      await pool.query("ROLLBACK");
+      throw e;
+    }
+
+    return res.status(200).json({ message: "Password updated successfully" });
+  } catch (error) {
+    console.error("resetPassword error:", error);
     return res.status(500).json({ error: "Server error" });
   }
 };

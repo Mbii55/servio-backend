@@ -10,6 +10,8 @@ export interface VerificationDocument {
   document_url: string;
   document_name: string | null;
   file_size: number | null;
+  cloudinary_public_id?: string | null;
+  cloudinary_resource_type?: string | null;
   uploaded_at: string;
   is_verified: boolean;
   verified_at: string | null;
@@ -59,4 +61,6 @@ export interface UploadDocumentInput {
   document_url: string;
   document_name?: string;
   file_size?: number;
+  cloudinary_public_id?: string | null;
+  cloudinary_resource_type?: string | null;
 }

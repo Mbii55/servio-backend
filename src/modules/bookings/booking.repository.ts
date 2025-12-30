@@ -4,84 +4,146 @@ import { Booking, BookingStatus, BookingAddonInput } from "./booking.types";
 import { getCommissionRateForProvider } from "../businessProfiles/businessProfile.repository";
 import { createEarningsForBooking } from "../earnings/earnings.repository";
 
-export async function createBookingWithAddons(params: {
+
+/**
+ * ✅ NEW: Check if provider is verified before allowing bookings
+ */
+export async function isProviderVerified(providerId: string): Promise<boolean> {
+  const result = await pool.query(
+    `
+    SELECT bp.verification_status
+    FROM business_profiles bp
+    WHERE bp.user_id = $1
+    LIMIT 1
+    `,
+    [providerId]
+  );
+
+  if (result.rows.length === 0) return false;
+  
+  return result.rows[0].verification_status === 'approved';
+}
+
+/**
+ * ✅ UPDATED: Create booking with verification check
+ */
+export async function createBookingWithAddons(input: {
   customerId: string;
   serviceId: string;
   addressId?: string;
-  scheduled_date: string; // "YYYY-MM-DD"
-  scheduled_time: string; // "HH:MM"
-  addons?: BookingAddonInput[];
+  scheduled_date: string;
+  scheduled_time: string;
+  addons?: { addon_id: string; quantity?: number }[];
   payment_method?: "cash" | "card" | "wallet";
   customer_notes?: string;
-}): Promise<Booking> {
-  const {
-    customerId,
-    serviceId,
-    addressId,
-    scheduled_date,
-    scheduled_time,
-    addons = [],
-    payment_method = "cash",
-    customer_notes,
-  } = params;
-
+}): Promise<any> {
   const client = await pool.connect();
-
+  
   try {
     await client.query("BEGIN");
 
-    // Get service info (includes provider_id and base_price)
-    const serviceRes = await client.query<{
-      id: string;
-      provider_id: string;
-      base_price: string;
-    }>(
+    // 1️⃣ Fetch service and get provider_id
+    const serviceResult = await client.query(
+      `SELECT id, provider_id, base_price, title FROM services WHERE id = $1`,
+      [input.serviceId]
+    );
+    
+    if (serviceResult.rows.length === 0) {
+      throw new Error("Service not found");
+    }
+    
+    const service = serviceResult.rows[0];
+    const providerId = service.provider_id;
+    
+    // ✅ Parse service price properly
+    const servicePrice = parseFloat(service.base_price);
+    
+    console.log('Service details:', {
+      id: service.id,
+      providerId,
+      base_price: service.base_price,
+      servicePrice: servicePrice
+    });
+
+    // 2️⃣ CHECK PROVIDER VERIFICATION STATUS
+    const verificationCheck = await client.query(
       `
-      SELECT id, provider_id, base_price
-      FROM services
-      WHERE id = $1
+      SELECT bp.verification_status
+      FROM business_profiles bp
+      WHERE bp.user_id = $1
+      LIMIT 1
       `,
-      [serviceId]
+      [providerId]
     );
 
-    const service = serviceRes.rows[0];
-    if (!service) throw new Error("Service not found");
+    if (verificationCheck.rows.length === 0) {
+      throw new Error("Provider business profile not found");
+    }
 
-    const basePrice = Number(service.base_price);
-    const providerId = service.provider_id;
+    const verificationStatus = verificationCheck.rows[0].verification_status;
 
-    // Calculate addons price and prepare snapshots
+    if (verificationStatus !== 'approved') {
+      throw new Error("This provider is not yet verified. Bookings are not available at this time.");
+    }
+
+    // 3️⃣ Get provider's commission rate
+    const commissionResult = await client.query(
+      `SELECT commission_rate FROM business_profiles WHERE user_id = $1`,
+      [providerId]
+    );
+    
+    const commissionRate = commissionResult.rows[0]?.commission_rate 
+      ? parseFloat(commissionResult.rows[0].commission_rate) 
+      : 15.00;
+
+    // 4️⃣ Handle addons if provided
     let addonsPrice = 0;
-    type AddonRow = { id: string; name: string; price: string };
-    let addonRows: AddonRow[] = [];
+    const addonRecords: Array<{
+      addon_id: string;
+      addon_name: string;
+      addon_price: string;
+      quantity: number;
+    }> = [];
 
-    if (addons.length > 0) {
-      const addonIds = addons.map((a) => a.addon_id);
-      const addonRes = await client.query<AddonRow>(
-        `
-        SELECT id, name, price
-        FROM service_addons
-        WHERE id = ANY($1::uuid[])
-        `,
+    if (input.addons && input.addons.length > 0) {
+      const addonIds = input.addons.map((a) => a.addon_id);
+      const addonResult = await client.query(
+        `SELECT id, name, price FROM service_addons WHERE id = ANY($1::uuid[])`,
         [addonIds]
       );
-      addonRows = addonRes.rows;
 
-      for (const inputAddon of addons) {
-        const dbAddon = addonRows.find((a) => a.id === inputAddon.addon_id);
-        if (!dbAddon) continue;
-        const qty = inputAddon.quantity ?? 1;
-        addonsPrice += qty * Number(dbAddon.price);
+      for (const addonRow of addonResult.rows) {
+        const inputAddon = input.addons.find((a) => a.addon_id === addonRow.id);
+        const quantity = inputAddon?.quantity ?? 1;
+        const price = parseFloat(addonRow.price);
+        const lineTotal = price * quantity;
+
+        addonsPrice += lineTotal;
+        addonRecords.push({
+          addon_id: addonRow.id,
+          addon_name: addonRow.name,
+          addon_price: addonRow.price,
+          quantity,
+        });
       }
     }
 
-    const subtotal = basePrice + addonsPrice;
-    const commissionRate = await getCommissionRateForProvider(providerId);
-    const commissionAmount = (subtotal * commissionRate) / 100;
-    const providerEarnings = subtotal - commissionAmount;
+    // 5️⃣ Calculate totals
+    const subtotal = servicePrice + addonsPrice;
+    const commissionAmount = parseFloat(((subtotal * commissionRate) / 100).toFixed(2));
+    const providerEarnings = parseFloat((subtotal - commissionAmount).toFixed(2));
 
-    // Insert into bookings (booking_number generated by trigger)
-    const bookingRes = await client.query<Booking>(
+    console.log('Booking calculations:', {
+      servicePrice,
+      addonsPrice,
+      subtotal,
+      commissionRate,
+      commissionAmount,
+      providerEarnings
+    });
+
+    // 6️⃣ Insert booking - WITH service_price column
+    const bookingResult = await client.query(
       `
       INSERT INTO bookings (
         customer_id,
@@ -91,72 +153,68 @@ export async function createBookingWithAddons(params: {
         scheduled_date,
         scheduled_time,
         status,
+        payment_method,
+        payment_status,
         service_price,
         addons_price,
         subtotal,
+        commission_rate,
         commission_amount,
         provider_earnings,
-        payment_method,
-        payment_status,
         customer_notes
       )
-      VALUES (
-        $1,$2,$3,$4,$5,$6,
-        'pending',
-        $7,$8,$9,$10,$11,
-        $12,
-        'pending',
-        $13
-      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *
       `,
       [
-        customerId,
+        input.customerId,
         providerId,
-        serviceId,
-        addressId ?? null,
-        scheduled_date,
-        scheduled_time,
-        subtotal === 0 ? 0 : basePrice, // base service price
-        addonsPrice,
-        subtotal,
-        commissionAmount,
-        providerEarnings,
-        payment_method,
-        customer_notes ?? null,
+        input.serviceId,
+        input.addressId ?? null,
+        input.scheduled_date,
+        input.scheduled_time,
+        "pending",
+        input.payment_method ?? "cash",
+        "pending",
+        servicePrice,           // $10 - service_price ✅
+        addonsPrice,            // $11 - addons_price ✅
+        subtotal,               // $12 - subtotal ✅
+        commissionRate,         // $13 - commission_rate ✅
+        commissionAmount,       // $14 - commission_amount ✅
+        providerEarnings,       // $15 - provider_earnings ✅
+        input.customer_notes ?? null, // $16 - customer_notes ✅
       ]
     );
 
-    const booking = bookingRes.rows[0];
+    const booking = bookingResult.rows[0];
 
-    // Insert booking_addons snapshots
-    if (addons.length > 0 && addonRows.length > 0) {
-      for (const inputAddon of addons) {
-        const dbAddon = addonRows.find((a) => a.id === inputAddon.addon_id);
-        if (!dbAddon) continue;
-        const qty = inputAddon.quantity ?? 1;
-
+    // 7️⃣ Insert booking_addons
+    if (addonRecords.length > 0) {
+      for (const addon of addonRecords) {
         await client.query(
           `
-          INSERT INTO booking_addons (
-            booking_id,
-            addon_id,
-            addon_name,
-            addon_price,
-            quantity
-          )
-          VALUES ($1,$2,$3,$4,$5)
+          INSERT INTO booking_addons (booking_id, addon_id, addon_name, addon_price, quantity)
+          VALUES ($1, $2, $3, $4, $5)
           `,
-          [booking.id, dbAddon.id, dbAddon.name, dbAddon.price, qty]
+          [booking.id, addon.addon_id, addon.addon_name, addon.addon_price, addon.quantity]
         );
       }
     }
 
     await client.query("COMMIT");
-    return booking;
-  } catch (err) {
+
+    console.log('✅ Booking created successfully:', booking.id);
+
+    // Return booking with provider_id
+    return {
+      ...booking,
+      provider_id: providerId,
+    };
+    
+  } catch (error) {
     await client.query("ROLLBACK");
-    throw err;
+    console.error('❌ Booking creation error:', error);
+    throw error;
   } finally {
     client.release();
   }

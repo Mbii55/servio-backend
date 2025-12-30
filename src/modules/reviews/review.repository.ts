@@ -239,7 +239,7 @@ export async function canReviewBooking(customerId: string, bookingId: string): P
       b.id,
       b.customer_id,
       b.status,
-      (SELECT COUNT(*) FROM reviews WHERE booking_id = b.id) as review_count
+      (SELECT COUNT(*)::int FROM reviews WHERE booking_id = b.id) as review_count
     FROM bookings b
     WHERE b.id = $1
       AND b.customer_id = $2
@@ -252,6 +252,7 @@ export async function canReviewBooking(customerId: string, bookingId: string): P
   return result.rows[0].review_count === 0;
 }
 
+
 /**
  * ADMIN: Get all reviews with filtering
  */
@@ -259,22 +260,31 @@ export async function adminListAllReviews(params?: {
   rating?: number;
   is_flagged?: boolean;
   search?: string;
-}): Promise<ReviewWithDetails[]> {
+}): Promise<any[]> {
   const { rating, is_flagged, search } = params || {};
 
   let query = `
     SELECT
-      r.*,
-      u.first_name as customer_first_name,
-      u.last_name as customer_last_name,
-      u.profile_image as customer_profile_image,
+      r.id,
+      r.booking_id,
+      r.customer_id,
+      r.provider_id,
+      r.service_id,
+      r.rating,
+      r.comment,
+      r.provider_response,
+      r.provider_response_at,
+      r.is_visible,
+      r.is_flagged,
+      r.flagged_reason,
+      r.created_at,
+      r.updated_at,
       b.booking_number,
-      b.scheduled_date,
-      s.title as service_title,
-      s.images as service_images,
-      pu.first_name as provider_first_name,
-      pu.last_name as provider_last_name,
-      bp.business_name as provider_business_name
+      CONCAT(u.first_name, ' ', u.last_name) as customer_name,
+      u.email as customer_email,
+      CONCAT(pu.first_name, ' ', pu.last_name) as provider_name,
+      COALESCE(bp.business_name, 'N/A') as provider_business_name,
+      s.title as service_title
     FROM reviews r
     JOIN users u ON u.id = r.customer_id
     JOIN users pu ON pu.id = r.provider_id
@@ -360,7 +370,7 @@ export async function adminToggleFlag(
 
   const isFlagged = current.rows[0].is_flagged;
 
-  // Toggle flag
+  // Toggle flag - ✅ FIXED: Added ::uuid casting
   const result = await pool.query<Review>(
     `
     UPDATE reviews
@@ -368,7 +378,7 @@ export async function adminToggleFlag(
       is_flagged = NOT is_flagged,
       flagged_reason = $2,
       flagged_at = CASE WHEN NOT is_flagged THEN CURRENT_TIMESTAMP ELSE NULL END,
-      flagged_by = CASE WHEN NOT is_flagged THEN $3 ELSE NULL END,
+      flagged_by = CASE WHEN NOT is_flagged THEN $3::uuid ELSE NULL END,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = $1
     RETURNING *
@@ -389,4 +399,33 @@ export async function adminDeleteReview(reviewId: string): Promise<boolean> {
   );
 
   return result.rows.length > 0;
+}
+
+/**
+ * ADMIN: Get overall review statistics
+ */
+export async function adminGetReviewStats(): Promise<{
+  total: number;
+  average_rating: number;
+  five_star: number;
+  four_star: number;
+  three_star: number;
+  two_star: number;
+  one_star: number;
+}> {
+  const result = await pool.query(
+    `
+    SELECT
+      COUNT(*)::int as total,
+      COALESCE(ROUND(AVG(rating)::numeric, 1), 0)::float as average_rating,
+      COUNT(*) FILTER (WHERE rating = 5)::int as five_star,
+      COUNT(*) FILTER (WHERE rating = 4)::int as four_star,
+      COUNT(*) FILTER (WHERE rating = 3)::int as three_star,
+      COUNT(*) FILTER (WHERE rating = 2)::int as two_star,
+      COUNT(*) FILTER (WHERE rating = 1)::int as one_star
+    FROM reviews
+    `
+  );
+
+  return result.rows[0];
 }

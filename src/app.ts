@@ -20,6 +20,7 @@ import usersRoutes from "./modules/users/user.routes";
 import businessProfilesRoutes from "./modules/businessProfiles/business_profiles.routes";
 import adminDashboardRoutes from "./modules/adminDashboard/adminDashboard.routes";
 import reviewRoutes from "./modules/reviews/review.routes";
+import verificationRoutes from "./modules/verification/verification.routes";
 
 const app: Application = express();
 
@@ -97,5 +98,6 @@ app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/businessProfiles", businessProfilesRoutes);
 app.use("/api/v1/admin/dashboard", adminDashboardRoutes);
 app.use("/api/v1/reviews", reviewRoutes);
+app.use("/api/v1/verification", verificationRoutes);
 
 export default app;

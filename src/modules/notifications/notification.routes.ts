@@ -10,10 +10,16 @@ import {
 
 const router = Router();
 
-// ✅ Changed from auth("provider") to auth(null) - allows all authenticated users
+// Get my notifications
 router.get("/", auth(null), getMyNotificationsHandler);
+
+// Get unread count
 router.get("/unread-count", auth(null), getMyUnreadCountHandler);
-router.patch("/read-all", auth(null), markAllReadHandler); // ✅ Changed POST to PATCH
+
+// ✅ FIXED: Changed endpoint to match frontend
+router.patch("/mark-all-read", auth(null), markAllReadHandler);
+
+// Mark one as read
 router.patch("/:id/read", auth(null), markOneReadHandler);
 
 export default router;

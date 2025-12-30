@@ -1,3 +1,6 @@
+// src/modules/reviews/review.routes.ts
+// ✅ UPDATED VERSION with stats endpoint
+
 import { Router } from "express";
 import { auth } from "../../middleware/auth.middleware";
 import {
@@ -8,6 +11,7 @@ import {
   addProviderResponseHandler,
   canReviewBookingHandler,
   adminListReviewsHandler,
+  adminGetStatsHandler, // ✅ ADD THIS IMPORT
   adminToggleVisibilityHandler,
   adminToggleFlagHandler,
   adminDeleteReviewHandler,
@@ -48,6 +52,9 @@ router.post("/:reviewId/response", auth("provider"), addProviderResponseHandler)
 /* ======================================================
    ADMIN ROUTES
 ====================================================== */
+
+// ✅ NEW: Get review statistics
+router.get("/admin/stats", auth("admin"), adminGetStatsHandler);
 
 // List all reviews with filters
 router.get("/admin/all", auth("admin"), adminListReviewsHandler);

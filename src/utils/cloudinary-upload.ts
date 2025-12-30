@@ -7,12 +7,13 @@ interface UploadOptions {
   width?: number;
   height?: number;
   crop?: string;
+  resourceType?: 'auto' | 'image' | 'video' | 'raw'; // ✅ Added
 }
 
 /**
- * Upload image buffer to Cloudinary
+ * Upload file buffer to Cloudinary
  * @param buffer - File buffer from multer
- * @param options - Upload options (folder, transformations)
+ * @param options - Upload options (folder, transformations, resourceType)
  * @returns Cloudinary upload result with secure_url
  */
 export const uploadToCloudinary = (
@@ -25,14 +26,15 @@ export const uploadToCloudinary = (
       width,
       height,
       crop = 'limit',
+      resourceType = 'auto', // ✅ Default to auto, but allow override
     } = options;
 
     // Create upload stream
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: folder,
-        resource_type: 'auto',
-        transformation: width && height ? [
+        resource_type: resourceType, // ✅ Use the provided resource_type
+        transformation: width && height && resourceType !== 'raw' ? [
           { width, height, crop }
         ] : undefined,
       },
@@ -52,13 +54,19 @@ export const uploadToCloudinary = (
 };
 
 /**
- * Delete image from Cloudinary
- * @param publicId - Cloudinary public_id of the image
+ * Delete file from Cloudinary
+ * @param publicId - Cloudinary public_id of the file
+ * @param resourceType - Type of resource (image, video, raw)
  * @returns Deletion result
  */
-export const deleteFromCloudinary = async (publicId: string): Promise<any> => {
+export const deleteFromCloudinary = async (
+  publicId: string,
+  resourceType: 'image' | 'video' | 'raw' = 'image'
+): Promise<any> => {
   try {
-    const result = await cloudinary.uploader.destroy(publicId);
+    const result = await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType,
+    });
     return result;
   } catch (error) {
     console.error('Cloudinary delete error:', error);

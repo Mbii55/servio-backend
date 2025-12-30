@@ -36,9 +36,16 @@ export interface BusinessProfile {
   tax_id: string | null;
   commission_rate: string;
   is_active: boolean;
+  verification_status: "pending" | "approved" | "rejected" | "resubmitted";
+  verified_at: string | null;
+  verified_by: string | null;
+  rejection_reason: string | null;
+  rejected_at: string | null;
+
   created_at: string;
   updated_at: string;
 }
+
 
 /* ======================================================
    CREATE
@@ -209,7 +216,10 @@ export interface AdminProviderProfileRow {
   last_name: string;
 }
 
-/* Admin: list all provider business profiles */
+/* ======================================================
+   Admin: list all provider business profiles
+   (with verification status for admin UI)
+====================================================== */
 export async function adminListProviderProfiles(): Promise<
   AdminProviderProfileRow[]
 > {
@@ -224,6 +234,13 @@ export async function adminListProviderProfiles(): Promise<
       bp.city,
       bp.country,
       bp.created_at,
+
+      -- ✅ verification fields
+      bp.verification_status,
+      bp.verified_at,
+      bp.rejected_at,
+
+      -- user info
       u.id AS user_id,
       u.display_id,
       u.email,
@@ -238,6 +255,7 @@ export async function adminListProviderProfiles(): Promise<
 
   return result.rows;
 }
+
 
 /* Admin: activate / deactivate provider business */
 export async function adminSetBusinessActive(

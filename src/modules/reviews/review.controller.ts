@@ -12,6 +12,7 @@ import {
   adminToggleVisibility,
   adminToggleFlag,
   adminDeleteReview,
+  adminGetReviewStats,
 } from "./review.repository";
 
 /**
@@ -162,12 +163,17 @@ export const adminListReviewsHandler = async (req: Request, res: Response) => {
       search: search as string,
     });
 
-    return res.json(reviews);
+    // ✅ Return in the format expected by frontend
+    return res.json({
+      reviews: reviews,
+      total: reviews.length
+    });
   } catch (error: any) {
     console.error("adminListReviewsHandler error:", error);
     return res.status(500).json({ error: "Server error" });
   }
 };
+
 
 /**
  * ADMIN: Toggle review visibility
@@ -227,5 +233,23 @@ export const adminDeleteReviewHandler = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("adminDeleteReviewHandler error:", error);
     return res.status(400).json({ error: error.message || "Failed to delete review" });
+  }
+};
+
+/**
+ * ADMIN: Get review statistics
+ */
+export const adminGetStatsHandler = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as AuthPayload;
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const stats = await adminGetReviewStats();
+    return res.json(stats);
+  } catch (error: any) {
+    console.error("adminGetStatsHandler error:", error);
+    return res.status(500).json({ error: "Server error" });
   }
 };
