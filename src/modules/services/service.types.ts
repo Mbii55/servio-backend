@@ -41,6 +41,8 @@ export interface Service {
 
 // ✅ THIS is what your repository is trying to import
 export type ServiceWithProvider = Service & {
+  category_name?: string | null;
+  category_slug?: string | null;
   provider: ProviderSummary;
 };
 

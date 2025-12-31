@@ -49,6 +49,22 @@ function minutesToTime(minutes: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+// helper: check if a YYYY-MM-DD string equals "today" in SERVER LOCAL time
+function isTodayLocal(dateStr: string): boolean {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const todayStr = `${yyyy}-${mm}-${dd}`;
+  return dateStr === todayStr;
+}
+
+// helper: round UP minutes to the next slot step (e.g., 11:01 → 11:30 if step=30)
+function roundUpToStep(minutes: number, step: number): number {
+  return Math.ceil(minutes / step) * step;
+}
+
+
 // helper: generate time slots with buffer consideration
 function generateSlotsWithBuffer(
   start: string,
@@ -279,45 +295,42 @@ export const getProviderSlotsForDateHandler = async (
       return res.status(400).json({ error: "serviceDuration must be a positive number" });
     }
 
-    // ✅ FIX: Parse date in local timezone, not UTC
-    const requestedDate = new Date(`${date}T00:00:00`); // Add time to avoid UTC issues
+    // ✅ Parse requested date in LOCAL timezone
+    const requestedDate = new Date(`${date}T00:00:00`);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     const maxDate = new Date(today);
     maxDate.setDate(maxDate.getDate() + 30);
 
     if (requestedDate < today || requestedDate > maxDate) {
-      return res.status(400).json({ 
-        error: "Date must be within the next 30 days" 
+      return res.status(400).json({
+        error: "Date must be within the next 30 days",
       });
     }
 
-    // Check if provider is blocked on this date
+    // ✅ Check if provider is blocked on this date
     const blocked = await isProviderBlockedOnDate(providerId, date);
     if (blocked) {
-      return res.json({ 
+      return res.json({
         provider_id: providerId,
-        date, 
+        date,
         slots: [],
-        message: "Provider is unavailable on this date"
+        message: "Provider is unavailable on this date",
       });
     }
 
-    // ✅ FIX: Use getDay() instead of getUTCDay()
+    // ✅ Use LOCAL day
     const dayOfWeek = mapJsDayToEnum(requestedDate.getDay());
 
-    const availability = await listAvailabilityForProviderOnDay(
-      providerId,
-      dayOfWeek
-    );
+    const availability = await listAvailabilityForProviderOnDay(providerId, dayOfWeek);
 
     if (availability.length === 0) {
-      return res.json({ 
+      return res.json({
         provider_id: providerId,
-        date, 
+        date,
         slots: [],
-        message: "Provider is not available on this day of the week"
+        message: "Provider is not available on this day of the week",
       });
     }
 
@@ -336,16 +349,37 @@ export const getProviderSlotsForDateHandler = async (
         durationMinutes,
         bookedSet
       );
-      
+
       allSlots.push(...rangeSlots);
     }
+
+    // ✅ NEW FIX: If selected date is today, hide past times
+    let finalSlots = allSlots;
+
+    if (isTodayLocal(date)) {
+      const now = new Date();
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+      // Match your slot granularity (your availability checks use 30-min blocks)
+      const STEP_MINUTES = 30;
+
+      // Round UP to next valid slot
+      const earliestAllowed = roundUpToStep(nowMinutes, STEP_MINUTES);
+
+      finalSlots = allSlots.filter((slot) => timeToMinutes(slot) >= earliestAllowed);
+    }
+
+    // Optional cleanup: sort + unique
+    finalSlots = Array.from(new Set(finalSlots)).sort(
+      (a, b) => timeToMinutes(a) - timeToMinutes(b)
+    );
 
     return res.json({
       provider_id: providerId,
       date,
       service_duration_minutes: durationMinutes,
       buffer_time_minutes: BUFFER_TIME_MINUTES,
-      slots: allSlots,
+      slots: finalSlots,
     });
   } catch (err) {
     console.error("getProviderSlotsForDateHandler error:", err);

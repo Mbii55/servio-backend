@@ -7,6 +7,9 @@ import {
   createServiceHandler,
   updateServiceHandler,
   deleteServiceHandler,
+  adminUpdateServiceStatusHandler,
+  getServiceAdminHandler,
+  listServicesAdminHandler,
 } from "./service.controller";
 import { auth } from "../../middleware/auth.middleware";
 import { upload } from "../../config/multer";
@@ -16,7 +19,13 @@ const MAX_SERVICE_IMAGES = 5;
 
 // Public endpoints
 router.get("/", listServicesHandler);
+
+// ✅ put admin routes BEFORE "/:id"
+router.get("/admin/:id", auth("admin"), getServiceAdminHandler);
+router.get("/admin", auth("admin"), listServicesAdminHandler);
+
 router.get("/:id", getServiceHandler);
+
 
 // Provider endpoints
 router.get("/me/mine", auth("provider"), listMyServicesHandler);
@@ -41,6 +50,14 @@ router.patch(
   upload.array("images", MAX_SERVICE_IMAGES), // Handle up to 5 images
   updateServiceHandler
 );
+
+// service.routes.ts
+router.patch(
+  "/admin/:id/status",
+  auth("admin"),
+  adminUpdateServiceStatusHandler
+);
+
 
 // Delete service
 router.delete("/:id", auth("provider"), deleteServiceHandler);

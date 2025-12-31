@@ -4,7 +4,6 @@ import pool from "../../config/database";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import { sendPasswordResetEmail } from "./auth.mailer";
 import {
   createUser,
   findUserByEmail,
@@ -26,7 +25,6 @@ import {
   markPasswordResetTokenUsed,
 } from "./passwordReset.repository";
 
-import { sendProviderRegistrationNotification } from "../../utils/email/sendProviderRegistrationNotification";
 
 const DEFAULT_ROLE: UserRole = "customer";
 
@@ -86,25 +84,6 @@ export const register = async (req: Request, res: Response) => {
         businessDescription: business_description,
         businessLogo: business_logo,
       });
-
-      // ✅ NEW: Send admin notification email
-      try {
-        await sendProviderRegistrationNotification({
-          providerName: `${first_name} ${last_name}`,
-          providerEmail: email,
-          providerPhone: phone,
-          businessName: business_name,
-          businessDescription: business_description,
-          userId: user.id,
-          businessProfileId: businessProfile.id,
-        });
-        
-        console.log(`✅ Admin notification sent for new provider: ${business_name}`);
-      } catch (emailError) {
-        // Log the error but don't fail registration
-        console.error('Failed to send admin notification email:', emailError);
-        // Registration continues successfully even if email fails
-      }
     }
 
     // Generate token
@@ -337,15 +316,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
       userId: user.id,
       tokenHash,
       expiresAt,
-    });
-
-    const baseUrl = process.env.PARTNER_WEB_URL || "http://localhost:3000";
-    const resetUrl = `${baseUrl}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
-
-    await sendPasswordResetEmail({
-      to: email,
-      name: user.first_name,
-      resetUrl,
     });
 
     return res.status(200).json({ message: "If the email exists, a reset link was sent." });

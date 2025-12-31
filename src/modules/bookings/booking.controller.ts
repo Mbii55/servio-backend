@@ -13,7 +13,6 @@ import { Server } from "socket.io";
 import { listProviderBookingsDetailed } from "./booking.repository";
 import { createNotification } from "../notifications/notification.repository";
 import { sendPushNotificationToUser } from "../../utils/expo-push.service";
-import { sendBookingConfirmationEmail } from "../../utils/email/sendBookingConfirmationEmail";
 import pool from "../../config/database";
 
 // ✅ UPDATED: Removed email notification - only in-app + push
@@ -154,53 +153,6 @@ export const createBookingHandler = async (req: Request, res: Response) => {
           type: "booking_created",
         },
       });
-
-      // ✅ Send booking confirmation email to customer
-      try {
-        const bookingDetails = await pool.query(
-          `
-          SELECT 
-            c.email,
-            c.first_name,
-            c.last_name,
-            s.title as service_title,
-            bp.business_name as provider_name,
-            b.scheduled_date,
-            b.scheduled_time,
-            b.subtotal,
-            b.payment_method,
-            b.customer_notes
-          FROM bookings b
-          JOIN users c ON c.id = b.customer_id
-          JOIN services s ON s.id = b.service_id
-          LEFT JOIN business_profiles bp ON bp.user_id = b.provider_id
-          WHERE b.id = $1
-          `,
-          [bookingId]
-        );
-
-        if (bookingDetails.rows.length > 0) {
-          const details = bookingDetails.rows[0];
-          
-          await sendBookingConfirmationEmail({
-            to: details.email,
-            customerName: `${details.first_name} ${details.last_name}`,
-            bookingNumber: bookingNumber,
-            serviceTitle: details.service_title,
-            providerName: details.provider_name || 'Service Provider',
-            scheduledDate: details.scheduled_date,
-            scheduledTime: details.scheduled_time,
-            subtotal: parseFloat(details.subtotal),
-            paymentMethod: details.payment_method,
-            customerNotes: details.customer_notes,
-          });
-
-          console.log(`✅ Booking confirmation email sent to customer`);
-        }
-      } catch (emailError) {
-        console.error('Error sending booking confirmation email:', emailError);
-        // Don't fail booking creation if email fails
-      }
     }
 
     // ✅ Socket emit

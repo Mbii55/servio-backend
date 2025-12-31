@@ -1,7 +1,7 @@
 // src/modules/addons/addon.controller.ts
 import { Request, Response } from "express";
 import { AuthPayload } from "../../middleware/auth.middleware";
-import { getServiceById } from "../services/service.repository";
+import { getServiceByIdForProvider } from "../services/service.repository";
 import {
   listAddonsByService,
   getAddonById,
@@ -38,7 +38,7 @@ export const createAddonHandler = async (req: Request, res: Response) => {
     }
 
     // Verify service belongs to provider
-    const service = await getServiceById(serviceId);
+    const service = await getServiceByIdForProvider(serviceId);
     if (!service) {
       return res.status(404).json({ error: "Service not found" });
     }
@@ -76,7 +76,7 @@ export const updateAddonHandler = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Addon not found" });
     }
 
-    const service = await getServiceById(existingAddon.service_id);
+    const service = await getServiceByIdForProvider(existingAddon.service_id);
     if (!service || service.provider_id !== user.userId) {
       return res.status(403).json({ error: "Not authorized" });
     }
@@ -108,7 +108,7 @@ export const deleteAddonHandler = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Addon not found" });
     }
 
-    const service = await getServiceById(existingAddon.service_id);
+    const service = await getServiceByIdForProvider(existingAddon.service_id);
     if (!service || service.provider_id !== user.userId) {
       return res.status(403).json({ error: "Not authorized" });
     }

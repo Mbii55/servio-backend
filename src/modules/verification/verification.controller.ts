@@ -22,10 +22,6 @@ import { DocumentType, VerificationStatus } from "./verification.types";
 import { createNotification } from "../notifications/notification.repository";
 import { sendPushNotificationToUser } from "../../utils/expo-push.service";
 import cloudinary from "../../config/cloudinary";
-import { sendVerificationApprovedEmail } from "../../utils/email/sendVerificationApprovedEmail";
-import { sendVerificationRejectedEmail } from "../../utils/email/sendVerificationRejectedEmail";
-
-// ... (keep all other imports)
 
 
 /**
@@ -284,14 +280,7 @@ export const adminUpdateStatusHandler = async (req: Request, res: Response) => {
               business_profile_id: id,
               screen: "Dashboard"
             },
-          });
-
-          // ✅ NEW: Send approval email
-          await sendVerificationApprovedEmail({
-            to: providerEmail,
-            providerName: providerName,
-            businessName: businessName,
-          });
+          })
 
           console.log(`✅ Sent approval notifications and email to provider ${providerId}`);
 
@@ -321,14 +310,6 @@ export const adminUpdateStatusHandler = async (req: Request, res: Response) => {
               reason: rejection_reason,
               screen: "BusinessProfile"
             },
-          });
-
-          // ✅ NEW: Send rejection email
-          await sendVerificationRejectedEmail({
-            to: providerEmail,
-            providerName: providerName,
-            businessName: businessName,
-            rejectionReason: rejection_reason || "Please review your documents",
           });
 
           console.log(`✅ Sent rejection notifications and email to provider ${providerId}`);

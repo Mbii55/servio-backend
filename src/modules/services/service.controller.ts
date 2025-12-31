@@ -8,6 +8,9 @@ import {
   updateService,
   deactivateService,
   countActiveServices,
+  getServiceByIdAdmin,
+  listServicesAdmin,
+  countServicesAdmin,
 } from "./service.repository";
 import { CreateServiceInput, UpdateServiceInput } from "./service.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
@@ -379,6 +382,61 @@ export const deleteServiceHandler = async (req: Request, res: Response) => {
     return res.json({ message: "Service deactivated" });
   } catch (error) {
     console.error("deleteServiceHandler error:", error);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+export const adminUpdateServiceStatusHandler = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    const updated = await updateService(id, { is_active: Boolean(is_active) });
+    if (!updated) return res.status(404).json({ error: "Service not found" });
+
+    return res.json(updated);
+  } catch (error) {
+    console.error("adminUpdateServiceStatusHandler error:", error);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+export const getServiceAdminHandler = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const service = await getServiceByIdAdmin(id);
+  if (!service) return res.status(404).json({ error: "Service not found" });
+  return res.json(service);
+};
+
+
+export const listServicesAdminHandler = async (req: Request, res: Response) => {
+  try {
+    const { categoryId, providerId, search, status, limit, offset } = req.query;
+
+    const params = {
+      categoryId: categoryId as string | undefined,
+      providerId: providerId as string | undefined,
+      search: search as string | undefined,
+      status: (status as "all" | "active" | "inactive") || "all",
+      limit: limit ? parseInt(limit as string, 10) : 20,
+      offset: offset ? parseInt(offset as string, 10) : 0,
+    };
+
+    const [services, total] = await Promise.all([
+      listServicesAdmin(params),
+      countServicesAdmin(params),
+    ]);
+
+    return res.json({
+      services,
+      total,
+      limit: params.limit,
+      offset: params.offset,
+      hasMore: params.offset + services.length < total,
+    });
+  } catch (error) {
+    console.error("listServicesAdminHandler error:", error);
     return res.status(500).json({ error: "Server error" });
   }
 };
