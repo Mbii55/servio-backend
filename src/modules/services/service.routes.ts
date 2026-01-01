@@ -10,7 +10,8 @@ import {
   adminUpdateServiceStatusHandler,
   getServiceAdminHandler,
   listServicesAdminHandler,
-  adminDeleteServiceHandler, // ✅ NEW
+  adminDeleteServiceHandler,
+  adminRestoreServiceHandler, // ✅ NEW
 } from "./service.controller";
 import { auth } from "../../middleware/auth.middleware";
 import { upload } from "../../config/multer";
@@ -27,8 +28,11 @@ router.get("/admin", auth("admin"), listServicesAdminHandler);
 
 router.patch("/admin/:id/status", auth("admin"), adminUpdateServiceStatusHandler);
 
-// ✅ NEW: Admin delete/deactivate service
+// ✅ Archive (admin remove) - expects { reason } in body
 router.delete("/admin/:id", auth("admin"), adminDeleteServiceHandler);
+
+// ✅ NEW: Restore archived service (admin)
+router.patch("/admin/:id/restore", auth("admin"), adminRestoreServiceHandler);
 
 // Public single service
 router.get("/:id", getServiceHandler);

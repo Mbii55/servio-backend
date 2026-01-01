@@ -26,17 +26,20 @@ export interface ProviderSummary {
 }
 
 export interface Service {
-  id: string; // UUID
+  id: string;
   provider_id: string;
   category_id: string;
   title: string;
   description: string;
-  base_price: string; // from DECIMAL
+  base_price: string;
   duration_minutes: number | null;
-  images: any | null; // JSONB, we will store string[]
+  images: any | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
+  archived_by?: string | null;
+  archive_reason?: string | null;
 }
 
 // ✅ THIS is what your repository is trying to import

@@ -11,6 +11,9 @@ import {
   getServiceByIdAdmin,
   listServicesAdmin,
   countServicesAdmin,
+  archiveService,
+  hasUpcomingBookings,
+  restoreService,
 } from "./service.repository";
 import { CreateServiceInput, UpdateServiceInput } from "./service.types";
 import { AuthPayload } from "../../middleware/auth.middleware";
@@ -410,6 +413,7 @@ export const getServiceAdminHandler = async (req: Request, res: Response) => {
 };
 
 
+// ✅ UPDATED: service.controller.ts
 export const listServicesAdminHandler = async (req: Request, res: Response) => {
   try {
     const { categoryId, providerId, search, status, limit, offset } = req.query;
@@ -418,7 +422,8 @@ export const listServicesAdminHandler = async (req: Request, res: Response) => {
       categoryId: categoryId as string | undefined,
       providerId: providerId as string | undefined,
       search: search as string | undefined,
-      status: (status as "all" | "active" | "inactive") || "all",
+      // ✅ add archived
+      status: (status as "all" | "active" | "inactive" | "archived") || "all",
       limit: limit ? parseInt(limit as string, 10) : 20,
       offset: offset ? parseInt(offset as string, 10) : 0,
     };
@@ -444,15 +449,48 @@ export const listServicesAdminHandler = async (req: Request, res: Response) => {
 
 export const adminDeleteServiceHandler = async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user as AuthPayload | undefined;
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
     const { id } = req.params;
+    const { reason } = (req.body || {}) as { reason?: string };
 
-    const updated = await deactivateService(id);
-    if (!updated) return res.status(404).json({ error: "Service not found" });
+    // ✅ IMPORTANT: archive immediately, DO NOT check upcoming bookings
+    const updated = await archiveService(id, user.userId, reason);
 
-    return res.json({ message: "Service deactivated" });
+    if (!updated) {
+      return res.status(404).json({ error: "Service not found or already archived" });
+    }
+
+    return res.json({ message: "Service archived successfully", service: updated });
   } catch (error) {
     console.error("adminDeleteServiceHandler error:", error);
     return res.status(500).json({ error: "Server error" });
   }
 };
 
+export const adminRestoreServiceHandler = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as AuthPayload | undefined;
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const { id } = req.params;
+
+    const restored = await restoreService(id, user.userId);
+    if (!restored) {
+      return res.status(404).json({
+        error: "Service not found or not archived",
+      });
+    }
+
+    return res.json({
+      message: "Service restored successfully (inactive by default)",
+      service: restored,
+    });
+  } catch (error) {
+    console.error("adminRestoreServiceHandler error:", error);
+    return res.status(500).json({ error: "Server error" });
+  }
+};

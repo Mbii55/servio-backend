@@ -19,6 +19,7 @@ export async function listActiveServices(params: {
 
   const conditions: string[] = [
     "s.is_active = true",
+    "s.archived_at IS NULL",
     "u.status = 'active'",
     "u.role = 'provider'",
     "bp.verification_status = 'approved'", // ✅ Only show services from verified providers
@@ -142,6 +143,7 @@ export async function countActiveServices(params: {
 
   const conditions: string[] = [
     "s.is_active = true",
+    "s.archived_at IS NULL",
     "u.status = 'active'",
     "u.role = 'provider'",
     "bp.verification_status = 'approved'", // ✅ ADDED
@@ -218,6 +220,7 @@ export async function getServiceById(id: string): Promise<ServiceWithProvider | 
     LEFT JOIN business_profiles bp ON bp.user_id = u.id
     WHERE s.id = $1
       AND s.is_active = true
+      AND s.archived_at IS NULL
       AND u.status = 'active'
       AND bp.verification_status = 'approved'
     LIMIT 1
@@ -275,11 +278,18 @@ export async function getServiceById(id: string): Promise<ServiceWithProvider | 
 // ✅ PROVIDER-ONLY: Get their own services (no verification filter)
 export async function listServicesByProvider(providerId: string): Promise<Service[]> {
   const result = await pool.query<Service>(
-    `SELECT * FROM services WHERE provider_id = $1 ORDER BY created_at DESC`,
+    `
+    SELECT *
+    FROM services
+    WHERE provider_id = $1
+      AND archived_at IS NULL
+    ORDER BY created_at DESC
+    `,
     [providerId]
   );
   return result.rows;
 }
+
 
 // Rest of the functions remain unchanged (create, update, deactivate)
 export async function createService(
@@ -409,6 +419,49 @@ export async function updateService(
   return updated;
 }
 
+
+
+export async function hasUpcomingBookings(serviceId: string): Promise<boolean> {
+  const result = await pool.query(
+    `
+    SELECT 1
+    FROM bookings
+    WHERE service_id = $1
+      AND status IN ('pending', 'accepted', 'in_progress')
+    LIMIT 1
+    `,
+    [serviceId]
+  );
+
+  return result.rows.length > 0;
+}
+
+// src/modules/services/service.repository.ts
+
+export async function archiveService(
+  id: string,
+  adminId: string,
+  reason?: string
+): Promise<Service | null> {
+  const result = await pool.query<Service>(
+    `
+    UPDATE services
+    SET
+      is_active = false,
+      archived_at = CURRENT_TIMESTAMP,
+      archived_by = $2,
+      archive_reason = $3
+    WHERE id = $1
+      AND archived_at IS NULL
+    RETURNING *
+    `,
+    [id, adminId, reason ?? null]
+  );
+
+  return result.rows[0] || null;
+}
+
+
 export async function deactivateService(id: string): Promise<Service | null> {
   const result = await pool.query<Service>(
     `UPDATE services SET is_active = false WHERE id = $1 RETURNING *`,
@@ -475,6 +528,10 @@ export async function getServiceByIdAdmin(id: string): Promise<ServiceWithProvid
     is_active: row.is_active,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    archived_at: row.archived_at ?? null,
+    archived_by: row.archived_by ?? null,
+    archive_reason: row.archive_reason ?? null,
+
     provider: {
       id: row.provider_id,
       first_name: row.provider_first_name,
@@ -499,25 +556,34 @@ export async function getServiceByIdAdmin(id: string): Promise<ServiceWithProvid
   };
 }
 
+// ✅ UPDATED: service.repository.ts
 export async function listServicesAdmin(params: {
   categoryId?: string;
   providerId?: string;
   search?: string;
-  status?: "all" | "active" | "inactive";
+  status?: "all" | "active" | "inactive" | "archived";
   limit?: number;
   offset?: number;
 }): Promise<ServiceWithProvider[]> {
   const { categoryId, providerId, search, status = "all", limit = 20, offset = 0 } = params;
 
-  const conditions: string[] = [
-    "u.role = 'provider'",
-  ];
-
+  const conditions: string[] = ["u.role = 'provider'"];
   const values: any[] = [];
   let index = 1;
 
-  if (status === "active") conditions.push("s.is_active = true");
-  if (status === "inactive") conditions.push("s.is_active = false");
+  // ✅ archive-aware filtering
+  if (status === "archived") {
+    conditions.push("s.archived_at IS NOT NULL");
+  } else if (status === "active") {
+    conditions.push("s.archived_at IS NULL");
+    conditions.push("s.is_active = true");
+  } else if (status === "inactive") {
+    conditions.push("s.archived_at IS NULL");
+    conditions.push("s.is_active = false");
+  } else {
+    // "all" -> show everything (archived + non-archived)
+    // no condition
+  }
 
   if (categoryId) {
     conditions.push(`s.category_id = $${index++}`);
@@ -591,6 +657,11 @@ export async function listServicesAdmin(params: {
     is_active: row.is_active,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    archived_at: row.archived_at ?? null,
+    archived_by: row.archived_by ?? null,
+    archive_reason: row.archive_reason ?? null,
+    // ✅ include archived_at if your Service type includes it (recommended)
+    // archived_at: row.archived_at,
     provider: {
       id: row.provider_id,
       first_name: row.provider_first_name,
@@ -617,23 +688,32 @@ export async function listServicesAdmin(params: {
   }));
 }
 
+
+// ✅ UPDATED: service.repository.ts
 export async function countServicesAdmin(params: {
   categoryId?: string;
   providerId?: string;
   search?: string;
-  status?: "all" | "active" | "inactive";
+  status?: "all" | "active" | "inactive" | "archived";
 }): Promise<number> {
   const { categoryId, providerId, search, status = "all" } = params;
 
-  const conditions: string[] = [
-    "u.role = 'provider'",
-  ];
-
+  const conditions: string[] = ["u.role = 'provider'"];
   const values: any[] = [];
   let index = 1;
 
-  if (status === "active") conditions.push("s.is_active = true");
-  if (status === "inactive") conditions.push("s.is_active = false");
+  // ✅ archive-aware filtering
+  if (status === "archived") {
+    conditions.push("s.archived_at IS NOT NULL");
+  } else if (status === "active") {
+    conditions.push("s.archived_at IS NULL");
+    conditions.push("s.is_active = true");
+  } else if (status === "inactive") {
+    conditions.push("s.archived_at IS NULL");
+    conditions.push("s.is_active = false");
+  } else {
+    // all -> no extra condition
+  }
 
   if (categoryId) {
     conditions.push(`s.category_id = $${index++}`);
@@ -670,3 +750,26 @@ export async function countServicesAdmin(params: {
 }
 
 
+// ✅ Restore archived service (admin)
+export async function restoreService(
+  id: string,
+  adminId: string
+): Promise<Service | null> {
+  const result = await pool.query<Service>(
+    `
+    UPDATE services
+    SET
+      archived_at = NULL,
+      archived_by = NULL,
+      archive_reason = NULL,
+      is_active = false,              -- ✅ restored but stays inactive by default
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1
+      AND archived_at IS NOT NULL
+    RETURNING *
+    `,
+    [id]
+  );
+
+  return result.rows[0] || null;
+}
