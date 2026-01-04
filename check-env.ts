@@ -1,12 +1,13 @@
 import dotenv from 'dotenv';
-
 dotenv.config();
 
 console.log('Environment variables check:');
-console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_PORT:', process.env.DB_PORT);
-console.log('DB_NAME:', process.env.DB_NAME);
-console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_PASSWORD type:', typeof process.env.DB_PASSWORD);
-console.log('DB_PASSWORD length:', process.env.DB_PASSWORD?.length);
-console.log('DB_PASSWORD value:', process.env.DB_PASSWORD ? '***SET***' : 'UNDEFINED');
+console.log('DATABASE_URL:', process.env.DATABASE_URL ? '***SET***' : 'UNDEFINED');
+console.log('JWT_SECRET:', process.env.JWT_SECRET ? '***SET***' : 'UNDEFINED');
+console.log('CLOUDINARY_CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME);
+console.log('CLOUDINARY_API_KEY:', process.env.CLOUDINARY_API_KEY);
+console.log('CLOUDINARY_API_SECRET:', process.env.CLOUDINARY_API_SECRET ? '***SET***' : 'UNDEFINED');
+console.log('ADMIN_ORIGIN:', process.env.ADMIN_ORIGIN);
+console.log('PARTNER_ORIGIN:', process.env.PARTNER_ORIGIN);
+console.log('PORT:', process.env.PORT);
+console.log('NODE_ENV:', process.env.NODE_ENV);
