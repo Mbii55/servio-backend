@@ -12,6 +12,7 @@ import {
   processRefund,
   getPaymentTransactionByBookingId,
   getPaymentLogs,
+  createBookingForPayment
 } from "./payment.repository";
 import { 
   getBookingById, 
@@ -34,42 +35,57 @@ export const initiatePayment = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { bookingId } = req.body;
+    // ✅ NEW: Accept booking data instead of bookingId
+    const { 
+      service_id,
+      scheduled_date,
+      scheduled_time,
+      address_id,
+      addons,
+      customer_notes,
+    } = req.body;
 
-    if (!bookingId) {
-      return res.status(400).json({ error: "bookingId is required" });
+    if (!service_id || !scheduled_date || !scheduled_time) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Get booking details
-    const booking = await getBookingById(bookingId);
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found" });
+    // Get service to calculate amount
+    const service = await pool.query(
+      `SELECT s.*, bp.commission_rate 
+       FROM services s
+       LEFT JOIN business_profiles bp ON bp.user_id = s.provider_id
+       WHERE s.id = $1`,
+      [service_id]
+    );
+
+    if (service.rows.length === 0) {
+      return res.status(404).json({ error: "Service not found" });
     }
 
-    // Verify user owns this booking
-    if (booking.customer_id !== user.userId) {
-      return res.status(403).json({ error: "Not authorized for this booking" });
+    const serviceData = service.rows[0];
+    const servicePrice = Number(serviceData.base_price);
+
+    // Calculate addons price
+    let addonsPrice = 0;
+    if (addons && addons.length > 0) {
+      const addonIds = addons.map((a: any) => a.addon_id);
+      const addonResult = await pool.query(
+        `SELECT id, price FROM service_addons WHERE service_id = $1 AND id = ANY($2::uuid[])`,
+        [service_id, addonIds]
+      );
+
+      for (const addonRow of addonResult.rows) {
+        const quantity = addons.find((a: any) => a.addon_id === addonRow.id)?.quantity || 1;
+        addonsPrice += Number(addonRow.price) * quantity;
+      }
     }
 
-    // Check booking status
-    if (booking.status !== "pending" && booking.status !== "accepted") {
-      return res.status(400).json({ 
-        error: "Booking must be pending or accepted to initiate payment" 
-      });
-    }
+    const totalAmount = servicePrice + addonsPrice;
 
-    // Check if payment already completed
-    const existingTransaction = await getPaymentTransactionByBookingId(bookingId);
-    if (existingTransaction && existingTransaction.status === "completed") {
-      return res.status(400).json({ 
-        error: "Payment already completed for this booking" 
-      });
-    }
-
-    // ✅ Get customer details from users table
+    // Get customer details
     const customerResult = await pool.query(
       `SELECT id, first_name, last_name, email, phone FROM users WHERE id = $1`,
-      [booking.customer_id]
+      [user.userId]
     );
 
     if (customerResult.rows.length === 0) {
@@ -81,77 +97,88 @@ export const initiatePayment = async (req: Request, res: Response) => {
     const customerEmail = customer.email;
     const customerMobile = customer.phone || '';
 
-    // Validate required fields for Noqoody
-    if (!customerEmail) {
+    if (!customerEmail || !customerMobile) {
       return res.status(400).json({ 
-        error: "Customer email is required for payment. Please update your profile." 
+        error: "Customer email and phone are required for payment. Please update your profile." 
       });
     }
 
-    if (!customerMobile) {
-      return res.status(400).json({ 
-        error: "Customer phone number is required for payment. Please update your profile." 
-      });
-    }
-
-    // Get customer IP and user agent
     const customerIp = req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
-    // Create frontend URLs (adjust based on your app structure)
     const returnUrl = `${process.env.MOBILE_APP_URL || 'servio://payment'}/success`;
     const cancelUrl = `${process.env.MOBILE_APP_URL || 'servio://payment'}/cancel`;
     const callbackUrl = `${process.env.API_URL || 'http://localhost:5000'}/api/v1/payments/webhook/noqoody`;
 
-    // Create payment transaction record
-    const transaction = await createPaymentTransaction({
-      bookingId,
-      provider: 'noqoody',
-      amount: Number(booking.subtotal),
-      currency: 'QAR',
-      returnUrl,
-      cancelUrl,
-      callbackUrl,
-      customerIp,
-      userAgent,
-    });
+    // ✅ Create payment transaction WITHOUT booking_id
+    const transaction = await pool.query(
+      `
+      INSERT INTO payment_transactions (
+        provider,
+        amount,
+        currency,
+        return_url,
+        cancel_url,
+        callback_url,
+        customer_ip,
+        user_agent,
+        expires_at,
+        status,
+        gateway_request_payload
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)
+      RETURNING *
+      `,
+      [
+        'noqoody',
+        totalAmount,
+        'QAR',
+        returnUrl,
+        cancelUrl,
+        callbackUrl,
+        customerIp,
+        userAgent,
+        new Date(Date.now() + 30 * 60 * 1000), // 30 min expiry
+        JSON.stringify({
+          service_id,
+          scheduled_date,
+          scheduled_time,
+          address_id,
+          addons,
+          customer_notes,
+          customer_id: user.userId,
+        })
+      ]
+    );
 
-    // Log transaction creation
+    const paymentTransaction = transaction.rows[0];
+
     await createPaymentLog({
-      paymentTransactionId: transaction.id,
+      paymentTransactionId: paymentTransaction.id,
       logType: 'request',
-      message: 'Payment transaction created',
-      data: { bookingId, amount: booking.subtotal },
+      message: 'Payment transaction created (pre-booking)',
+      data: { service_id, amount: totalAmount },
     });
 
-    // ✅ Call Noqoody API to generate payment link
+    // Call Noqoody API
     try {
       const noqoodyResponse = await noqoodyService.generatePaymentLink({
-        amount: Number(booking.subtotal),
+        amount: totalAmount,
         customerEmail: customerEmail,
         customerMobile: customerMobile,
         customerName: customerName,
-        description: `Booking ${booking.booking_number}`,
-        reference: transaction.transaction_reference,
+        description: `Service: ${serviceData.title}`,
+        reference: paymentTransaction.transaction_reference,
       });
 
-      // Log Noqoody request
-      await createPaymentLog({
-        paymentTransactionId: transaction.id,
-        logType: 'request',
-        message: 'Noqoody payment link request sent',
-        data: noqoodyResponse,
-      });
-
-      // Update transaction with Noqoody response
       await updatePaymentGatewayData({
-        transactionId: transaction.id,
+        transactionId: paymentTransaction.id,
         gatewayTransactionId: noqoodyResponse.Uuid,
         gatewayOrderId: noqoodyResponse.SessionId,
         paymentUrl: noqoodyResponse.PaymentUrl,
         requestPayload: {
-          reference: transaction.transaction_reference,
-          amount: booking.subtotal,
+          reference: paymentTransaction.transaction_reference,
+          amount: totalAmount,
           customerName,
           customerEmail,
           customerMobile,
@@ -159,18 +186,17 @@ export const initiatePayment = async (req: Request, res: Response) => {
         responsePayload: noqoodyResponse,
       });
 
-      // Log success
       await createPaymentLog({
-        paymentTransactionId: transaction.id,
+        paymentTransactionId: paymentTransaction.id,
         logType: 'response',
-        message: 'Noqoody payment link generated successfully',
+        message: 'Noqoody payment link generated',
         data: { paymentUrl: noqoodyResponse.PaymentUrl },
       });
 
       return res.json({
         success: true,
-        transactionId: transaction.id,
-        transactionReference: transaction.transaction_reference,
+        transactionId: paymentTransaction.id,
+        transactionReference: paymentTransaction.transaction_reference,
         paymentUrl: noqoodyResponse.PaymentUrl,
         sessionId: noqoodyResponse.SessionId,
         uuid: noqoodyResponse.Uuid,
@@ -178,17 +204,15 @@ export const initiatePayment = async (req: Request, res: Response) => {
       });
 
     } catch (noqoodyError: any) {
-      // Log Noqoody error
       await createPaymentLog({
-        paymentTransactionId: transaction.id,
+        paymentTransactionId: paymentTransaction.id,
         logType: 'error',
         message: 'Noqoody API error',
         data: { error: noqoodyError.message },
       });
 
-      // Update transaction as failed
       await updatePaymentStatus({
-        transactionId: transaction.id,
+        transactionId: paymentTransaction.id,
         status: 'failed',
         errorCode: 'NOQOODY_ERROR',
         errorMessage: noqoodyError.message,
@@ -219,32 +243,31 @@ export const validatePayment = async (req: Request, res: Response) => {
 
     const { transactionReference } = req.params;
 
-    // Get transaction from database
     const transaction = await getPaymentTransactionByReference(transactionReference);
     if (!transaction) {
       return res.status(404).json({ error: "Transaction not found" });
     }
 
-    // Get booking to verify ownership
-    const booking = await getBookingById(transaction.booking_id);
-    if (!booking || booking.customer_id !== user.userId) {
+    // Verify ownership (check customer_id in gateway_request_payload)
+    const requestPayload = transaction.gateway_request_payload;
+    if (requestPayload?.customer_id !== user.userId) {
       return res.status(403).json({ error: "Not authorized" });
     }
 
-    // If already completed, return status
-    if (transaction.status === 'completed') {
+    // If already completed and booking exists, return success
+    if (transaction.status === 'completed' && transaction.booking_id) {
       return res.json({
         success: true,
         status: 'completed',
         message: 'Payment already completed',
+        bookingId: transaction.booking_id,
       });
     }
 
-    // Call Noqoody to validate payment
+    // Call Noqoody to validate
     try {
       const validationResult = await noqoodyService.validatePayment(transactionReference);
 
-      // Log validation
       await createPaymentLog({
         paymentTransactionId: transaction.id,
         logType: 'response',
@@ -252,12 +275,31 @@ export const validatePayment = async (req: Request, res: Response) => {
         data: validationResult,
       });
 
-      // Check if payment was successful
-      // Note: You'll need to adjust this based on actual Noqoody response structure
       const isSuccess = validationResult.success && validationResult.data?.Status === 'Paid';
 
       if (isSuccess) {
-        // Update payment status to completed
+        // ✅ CREATE BOOKING NOW (after payment confirmed)
+        const bookingData = requestPayload;
+        
+        const booking = await createBookingForPayment({
+          customerId: bookingData.customer_id,
+          serviceId: bookingData.service_id,
+          scheduledDate: bookingData.scheduled_date,
+          scheduledTime: bookingData.scheduled_time,
+          addressId: bookingData.address_id,
+          addons: bookingData.addons,
+          customerNotes: bookingData.customer_notes,
+          paymentMethod: 'noqoody',
+          paymentTransactionId: transaction.id,
+        });
+
+        // Update transaction with booking_id
+        await pool.query(
+          `UPDATE payment_transactions SET booking_id = $1 WHERE id = $2`,
+          [booking.id, transaction.id]
+        );
+
+        // Update payment status
         await updatePaymentStatus({
           transactionId: transaction.id,
           status: 'completed',
@@ -265,9 +307,9 @@ export const validatePayment = async (req: Request, res: Response) => {
         });
 
         // Update booking payment status
-        await updateBookingPaymentStatus(transaction.booking_id, 'paid');
+        await updateBookingPaymentStatus(booking.id, 'paid');
 
-        // Create earnings record
+        // Create earnings
         await createEarningsForBooking({
           providerId: booking.provider_id,
           bookingId: booking.id,
@@ -294,23 +336,24 @@ export const validatePayment = async (req: Request, res: Response) => {
 
         await createNotification({
           user_id: booking.provider_id,
-          type: 'payment_received',
-          title: 'Payment Received',
-          message: `Payment of ${booking.subtotal} QAR received for booking ${booking.booking_number}.`,
+          type: 'booking_created',
+          title: 'New Paid Booking',
+          message: `New booking ${booking.booking_number} with payment confirmed.`,
           data: { booking_id: booking.id },
         });
 
         await sendPushNotificationToUser({
           userId: booking.provider_id,
-          title: 'Payment Received',
-          body: `Payment of ${booking.subtotal} QAR received.`,
-          data: { booking_id: booking.id, type: 'payment_received' },
+          title: 'New Paid Booking',
+          body: `New booking ${booking.booking_number} received.`,
+          data: { booking_id: booking.id, type: 'booking_created' },
         });
 
         return res.json({
           success: true,
           status: 'completed',
-          message: 'Payment validated and completed successfully',
+          message: 'Payment validated and booking created successfully',
+          bookingId: booking.id,
         });
       } else {
         return res.json({
