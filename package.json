@@ -13,15 +13,18 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.8.0",
     "cors": "^2.8.5",
+    "crypto": "^1.0.1",
     "dotenv": "^17.2.3",
     "expo-server-sdk": "^4.0.0",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "pg": "^8.16.3",
+    "qs": "^6.14.1",
     "resend": "^6.6.0",
     "socket.io": "^4.8.1"
   },
@@ -33,6 +36,7 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^25.0.3",
     "@types/pg": "^8.16.0",
+    "@types/qs": "^6.14.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
   }

@@ -21,6 +21,7 @@ import businessProfilesRoutes from "./modules/businessProfiles/business_profiles
 import adminDashboardRoutes from "./modules/adminDashboard/adminDashboard.routes";
 import reviewRoutes from "./modules/reviews/review.routes";
 import verificationRoutes from "./modules/verification/verification.routes";
+import paymentRoutes from "./modules/payments/payment.routes"; // ✅ Added payment routes
 
 const app: Application = express();
 
@@ -99,5 +100,6 @@ app.use("/api/v1/businessProfiles", businessProfilesRoutes);
 app.use("/api/v1/admin/dashboard", adminDashboardRoutes);
 app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/verification", verificationRoutes);
+app.use("/api/v1/payments", paymentRoutes); // ✅ Added payment routes
 
 export default app;

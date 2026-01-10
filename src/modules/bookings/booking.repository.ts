@@ -698,3 +698,16 @@ export async function listAllBookingsForAdmin(params?: {
   
   return res.rows;
 }
+
+/**
+ * Update booking payment status
+ */
+export async function updateBookingPaymentStatus(
+  bookingId: string,
+  paymentStatus: 'pending' | 'paid' | 'refunded'
+): Promise<void> {
+  await pool.query(
+    `UPDATE bookings SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+    [paymentStatus, bookingId]
+  );
+}
