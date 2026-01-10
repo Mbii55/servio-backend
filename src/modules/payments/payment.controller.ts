@@ -12,11 +12,11 @@ import {
   processRefund,
   getPaymentTransactionByBookingId,
   getPaymentLogs,
-  createBookingForPayment
 } from "./payment.repository";
 import { 
   getBookingById, 
-  updateBookingPaymentStatus 
+  updateBookingPaymentStatus,
+  createBookingForPayment
 } from "../bookings/booking.repository";
 import { createNotification } from "../notifications/notification.repository";
 import { sendPushNotificationToUser } from "../../utils/expo-push.service";

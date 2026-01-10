@@ -7,7 +7,7 @@ export type BookingStatus =
   | "cancelled"
   | "rejected";
 
-export type PaymentMethod = "cash" | "card" | "wallet";
+export type PaymentMethod = "cash" | "card" | "wallet" | "noqoody";
 export type PaymentStatus = "pending" | "paid" | "refunded";
 
 export interface Booking {
